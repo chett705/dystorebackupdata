@@ -10,6 +10,60 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class TopupService
 {
+    public function lookupGameUsername(string $gameCode, string $playerId, string $zoneId): array
+    {
+        $endpoint = config('services.game_lookup.endpoint');
+        $apiKey = config('services.game_lookup.api_key');
+        $timeout = (int) config('services.game_lookup.timeout', 20);
+
+        if (blank($endpoint) || blank($apiKey)) {
+            return [
+                'success' => false,
+                'message' => 'Game lookup API is not configured.',
+                'game_code' => $gameCode,
+                'player_id' => $playerId,
+                'zone_id' => $zoneId,
+            ];
+        }
+
+        try {
+            $response = Http::timeout($timeout)->withHeaders([
+                'Authorization' => 'Bearer ' . $apiKey,
+                'Accept' => 'application/json',
+            ])->post($endpoint, [
+                'game_code' => $gameCode,
+                'player_id' => $playerId,
+                'zone_id' => $zoneId,
+            ]);
+
+            if (! $response->successful()) {
+                return [
+                    'success' => false,
+                    'message' => 'Game lookup API returned an error.',
+                    'status' => $response->status(),
+                    'body' => $response->json() ?? $response->body(),
+                ];
+            }
+
+            return [
+                'success' => true,
+                'data' => $response->json(),
+            ];
+        } catch (\Throwable $throwable) {
+            Log::warning('Game lookup failed.', [
+                'game_code' => $gameCode,
+                'player_id' => $playerId,
+                'zone_id' => $zoneId,
+                'error' => $throwable->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => $throwable->getMessage(),
+            ];
+        }
+    }
+
     public function buildKhqrCheckout(TopupOrder $order): array
     {
         $gatewayUrl = config('services.khqr.gateway_url');
@@ -22,8 +76,8 @@ class TopupService
 
         $transactionId = $order->gateway_transaction_id ?: ('ORD_' . $order->order_no . '_' . now()->format('YmdHis'));
         $amount = number_format((float) $order->amount, 2, '.', '');
-        // Keep the remark very short so KHQR/Bakong doesn't truncate the service id.
-        $remark = sprintf('MLBB|ID: %s|ZONE: %s', $order->player_id, $order->zone_id);
+        // Keep the remark very short so KHQR/Bakong doesn't truncate the important bits.
+        $remark = sprintf('MLBB|ID:%s|S:%s', $order->player_id, $order->zone_id);
 
         $paymentData = [
             'transaction_id' => $transactionId,
@@ -88,6 +142,7 @@ class TopupService
             "Game: {$order->game?->name}",
             "Package: {$order->package?->name} ({$order->diamond_amount} Diamonds)",
             "Player ID: {$order->player_id}",
+            "Username: " . ($order->player_username ?: '-'),
             "Server ID: {$order->zone_id}",
             "Amount: {$order->amount}",
             "Status: {$order->status}",

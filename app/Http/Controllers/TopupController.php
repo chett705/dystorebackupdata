@@ -39,12 +39,35 @@ class TopupController extends Controller
         ]);
     }
 
+    public function checkUsername(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'game_code' => ['required', 'string', 'exists:topup_games,code'],
+            'player_id' => ['required', 'string', 'max:50'],
+            'zone_id' => ['required', 'string', 'max:50'],
+        ]);
+
+        $lookup = $this->topupService->lookupGameUsername(
+            $validated['game_code'],
+            $validated['player_id'],
+            $validated['zone_id']
+        );
+
+        return response()->json([
+            'message' => $lookup['success']
+                ? 'Username lookup completed.'
+                : ($lookup['message'] ?? 'Username lookup could not be completed.'),
+            'result' => $lookup,
+        ], $lookup['success'] ? 200 : 422);
+    }
+
     public function createOrder(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'game_code' => ['required', 'string', 'exists:topup_games,code'],
             'package_id' => ['required', 'integer', 'exists:topup_packages,id'],
             'player_id' => ['required', 'string', 'max:50'],
+            'player_username' => ['nullable', 'string', 'max:191'],
             'zone_id' => ['required', 'string', 'max:50'],
             'payment_method' => ['required', 'in:khqr'],
         ]);
@@ -62,6 +85,7 @@ class TopupController extends Controller
                 'topup_game_id' => $game->id,
                 'topup_package_id' => $package->id,
                 'player_id' => $validated['player_id'],
+                'player_username' => $validated['player_username'] ?? null,
                 'zone_id' => $validated['zone_id'],
                 'payment_method' => $validated['payment_method'],
                 'amount' => $package->price,

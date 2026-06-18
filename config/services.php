@@ -49,6 +49,12 @@ return [
         'timeout' => env('MLBB_SUPPLIER_TIMEOUT', 20),
     ],
 
+    'game_lookup' => [
+        'endpoint' => env('GAME_LOOKUP_ENDPOINT'),
+        'api_key' => env('GAME_LOOKUP_API_KEY'),
+        'timeout' => env('GAME_LOOKUP_TIMEOUT', 20),
+    ],
+
     'telegram' => [
         'bot_token' => env('TELEGRAM_BOT_TOKEN'),
         'chat_id' => env('TELEGRAM_CHAT_ID'),

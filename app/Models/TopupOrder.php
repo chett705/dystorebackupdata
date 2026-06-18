@@ -15,6 +15,7 @@ class TopupOrder extends Model
         'topup_game_id',
         'topup_package_id',
         'player_id',
+        'player_username',
         'zone_id',
         'payment_method',
         'amount',
@@ -36,6 +37,7 @@ class TopupOrder extends Model
     protected $casts = [
         'amount' => 'decimal:2',
         'diamond_amount' => 'integer',
+        'player_username' => 'string',
         'gateway_payload' => 'array',
         'supplier_payload' => 'array',
         'paid_at' => 'datetime',
