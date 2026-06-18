@@ -19,7 +19,7 @@ ENV APACHE_DOCUMENT_ROOT /var/www/html/public
 RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
 RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf
 
-# 🚀 គន្លឹះសំខាន់បំផុត៖ បន្ថែមកូដបើកសិទ្ធិឱ្យ Apache ព្រមអានហ្វាយ .htaccess (AllowOverride All)
+# 🚀 គន្លឹះសំខាន់បំផុត៖ បើកសិទ្ធិឱ្យ Apache ព្រមអានហ្វាយ .htaccess (AllowOverride All)
 RUN echo '<Directory /var/www/html/public>\n\
     Options Indexes FollowSymLinks\n\
     AllowOverride All\n\
@@ -35,7 +35,7 @@ COPY . .
 # ដំឡើង Composer 
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
-# 🚀 ឥឡូវនេះរត់ composer install ច្បាស់ជាដើរលែងគាំងទៀតហើយ ព្រោះវាមានហ្វាយ composer.json រួចរាល់
+# 🚀 រត់ composer install សម្រាប់ Production (គ្មាន dev packages ឡើយ)
 RUN composer install --no-dev --optimize-autoloader --no-interaction --no-scripts
 
 # កំណត់សិទ្ធិ Permissions លើ Folder ផ្ទុកទិន្នន័យ  
@@ -43,5 +43,5 @@ RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cac
 
 EXPOSE 80
 
-# ទុកតែ apache2-foreground ស្អាត ដើម្បីឱ្យ Server បើកដំណើរការបានរលូន
-CMD ["/bin/sh", "-c", "php artisan migrate --force --seed && apache2-foreground"]
+# 🚀 បញ្ជាដំឡើងផ្ដាច់ព្រ័ត្រ៖ ជម្រះ Config Cache, រត់រៀបចំតារាង Database និងបើក Server Apache
+CMD ["/bin/sh", "-c", "php artisan config:clear && php artisan migrate --force && apache2-foreground"]
