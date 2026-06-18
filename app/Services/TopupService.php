@@ -66,22 +66,19 @@ class TopupService
 
     public function buildKhqrCheckout(TopupOrder $order): array
     {
-        $gatewayUrl = config('services.khqr.gateway_url');
-        $profileId = config('services.khqr.profile_id');
-        $secretKey = config('services.khqr.secret_key');
+        // 🚀 បង្ខំដាក់តម្លៃ Keys ផ្លូវការចូលទៅក្នុងកូដផ្ទាល់ ដើម្បីកុំឱ្យវាដេញរកពី Render Environment Variables នាំទាស់ទៀតបង
+        $gatewayUrl = 'https://khqr.cc/api/payment/request';
+        $profileId = 'tW6PHjgPyzISFi3KK22hKZ57rag1cWHS';
+        $secretKey = 'zsFq7SWHV4gYFSAdfg2ud8WV747tBOei';
 
-        if (blank($gatewayUrl) || blank($profileId) || blank($secretKey)) {
-            throw new HttpException(500, 'KHQR configuration is missing.');
-        }
-
-        // 🚀 កូដការពារ (Safe Check)៖ ការពារករណី order_no ឬ database record លោតមកជាប់ null ឬមិនទាន់រក្សាទុកចប់
+        // 🚀 កូដការពារ (Safe Check)
         $orderNo = $order->order_no ?? ('TEMP_' . time() . '_' . Str::upper(Str::random(5)));
         $transactionId = $order->gateway_transaction_id ?: ('ORD_' . $orderNo . '_' . date('YmdHis'));
         
-        // 🚀 ការពារតម្លៃ null ដោយប្រើ ?? 0 និងធានាបំប្លែងទៅជា String Decimal លេខពីរខ្ទង់ (e.g., "2.00")
+        // ការពារតម្លៃ null និងបំប្លែងទៅជា String Decimal លេខពីរខ្ទង់ (e.g., "2.00")
         $amount = number_format((float) ($order->amount ?? 0), 2, '.', '');
         
-        // 🚀 ការពារករណី player_id ឬ zone_id ទទេរ ដើម្បីកុំឱ្យទាស់មុខងារ sprintf
+        // ការពារករណី player_id ឬ zone_id ទទេរ
         $playerId = $order->player_id ?? '0';
         $zoneId = $order->zone_id ?? '0';
         $remark = sprintf('MLBB|ID:%s|S:%s', $playerId, $zoneId);
@@ -92,7 +89,7 @@ class TopupService
             'remark' => $remark,
         ];
 
-        // 🚀 រត់ Hash ជាមួយតម្លៃដែលត្រូវបានសម្អាត និងមានសុវត្ថិភាពខ្ពស់ រួចជាស្រេច
+        // រត់ Hash ជាមួយតម្លៃសុវត្ថិភាព
         $paymentData['hash'] = sha1(
             $secretKey
             . $paymentData['transaction_id']
