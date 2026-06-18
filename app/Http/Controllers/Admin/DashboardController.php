@@ -9,20 +9,16 @@ use App\Models\TopupPackage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-class DashboardController extends Controller
+class AdminDashboardController extends Controller
 {
     /**
      * 📊 មុខងារទាញយកទិន្នន័យសរុបសម្រាប់ផ្ទាំង Dashboard Overview & Management
      */
     public function index(): JsonResponse
     {
-        // គណនាប្រាក់ចំណូលសរុប (Revenue) ពី Orders ណាដែលមានស្ថានភាព 'success'
-        $revenue = TopupOrder::query()
-            ->where('status', 'success')
-            ->sum('amount');
+        $revenue = TopupOrder::query()->where('status', 'success')->sum('amount');
 
         return response()->json([
-            // 🎯 កែសម្រួល Key ឱ្យត្រូវគ្នាជាមួយ React Stats Component
             'stats' => [
                 'games' => TopupGame::count(),
                 'packages' => TopupPackage::count(),
@@ -73,29 +69,30 @@ class DashboardController extends Controller
     }
 
     /**
-     * 📦 មុខងារបង្កើតកញ្ចប់តម្លៃ Diamonds ថ្មី (Create New Package)
+     * 📦 មុខងារបង្កើតកញ្ចប់តម្លៃ Diamonds ថ្មី (Auto-generate Name)
      */
     public function storePackage(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'game_id' => ['required', 'integer', 'exists:topup_games,id'], 
-            'name' => ['required', 'string', 'max:255'],
-            'price' => ['required', 'numeric', 'min:0'],
-            'sort_order' => ['nullable', 'integer', 'min:0'],
-            'is_active' => ['nullable', 'boolean'],
+            'game_id'        => ['required', 'integer', 'exists:topup_games,id'],
+            'price'          => ['required', 'numeric', 'min:0'],
+            'diamond_amount' => ['required', 'integer', 'min:1'],
+            'is_active'      => ['nullable', 'boolean'],
         ]);
 
         $package = TopupPackage::query()->create([
-            'topup_game_id' => $validated['game_id'], 
-            'name' => trim($validated['name']),
-            'price' => $validated['price'],
-            'sort_order' => $validated['sort_order'] ?? 0,
-            'is_active' => $request->boolean('is_active', true),
+            'topup_game_id'  => $validated['game_id'],
+            'price'          => $validated['price'],
+            'diamond_amount' => $validated['diamond_amount'],
+            // 🎯 បង្កើតឈ្មោះស្វ័យប្រវត្តិក្នុង DB ការពារកូដបាក់ (ឧទាហរណ៍៖ "100 Diamonds")
+            'name'           => $validated['diamond_amount'] . ' Diamonds', 
+            'sort_order'     => 0,
+            'is_active'      => $request->boolean('is_active', true),
         ]);
 
         return response()->json([
             'message' => 'Package created successfully.',
-            'package' => $package->fresh(['game']), // 🚀 បោះ Key ឈ្មោះ package ទៅឱ្យត្រូវនឹង React unwrap()
+            'package' => $package->fresh(['game']), 
         ], 201);
     }
 
@@ -105,41 +102,52 @@ class DashboardController extends Controller
     public function updatePackage(Request $request, TopupPackage $package): JsonResponse
     {
         $validated = $request->validate([
-            'price' => ['required', 'numeric', 'min:0'],
-            'sort_order' => ['nullable', 'integer', 'min:0'],
-            'is_active' => ['nullable', 'boolean'],
+            'game_id'        => ['nullable', 'integer', 'exists:topup_games,id'],
+            'price'          => ['required', 'numeric', 'min:0'],
+            'diamond_amount' => ['required', 'integer', 'min:1'],
+            'sort_order'     => ['nullable', 'integer', 'min:0'],
+            'is_active'      => ['nullable', 'boolean'],
         ]);
 
         $package->update([
-            'price' => $validated['price'],
-            'sort_order' => $validated['sort_order'] ?? $package->sort_order,
-            'is_active' => $request->boolean('is_active'),
+            'topup_game_id'  => $validated['game_id'] ?? $package->topup_game_id,
+            'price'          => $validated['price'],
+            'diamond_amount' => $validated['diamond_amount'],
+            'name'           => $validated['diamond_amount'] . ' Diamonds', // ធ្វើបច្ចុប្បន្នភាពឈ្មោះតាមគ្រាប់ Diamonds
+            'sort_order'     => $validated['sort_order'] ?? $package->sort_order,
+            'is_active'      => $request->boolean('is_active'),
         ]);
 
         return response()->json([
             'message' => 'Package updated successfully.',
-            'package' => $package->fresh(['game']), // 🚀 បោះ Key ឈ្មោះ package ទៅឱ្យត្រូវនឹង React
+            'package' => $package->fresh(['game']),
         ]);
     }
 
     /**
-     * 🔄 មុខងារកែប្រែស្ថានភាព Order (Update Order Status)
+     * 🔄 មុខងារកែប្រែស្ថានភាព Order (Fixed Nullable Player Username)
      */
     public function updateOrder(Request $request, TopupOrder $order): JsonResponse
     {
         $validated = $request->validate([
-            'status' => ['required', 'in:pending,paid,processing,success,failed'],
-            'player_username' => ['nullable', 'string', 'max:191'],
+            'status'          => ['required', 'in:pending,paid,processing,success,failed'],
+            'player_username' => ['nullable', 'string', 'max:191'], 
         ]);
 
-        $order->update([
+        $updateData = [
             'status' => $validated['status'],
-            'player_username' => $validated['player_username'] ?? $order->player_username,
-        ]);
+        ];
+
+        // 🎯 ដំណោះស្រាយគន្លឹះ៖ បើមានការបំពេញទើបយើងយកទៅ Update ការពារកុំឱ្យបាក់ SQL Constraint លើ Render
+        if ($request->has('player_username') && !is_null($request->input('player_username'))) {
+            $updateData['player_username'] = trim($validated['player_username']);
+        }
+
+        $order->update($updateData);
 
         return response()->json([
             'message' => 'Order updated successfully.',
-            'data' => $order->fresh(['game', 'package']),
+            'data'    => $order->fresh(['game', 'package']),
         ]);
     }
 }
