@@ -1,35 +1,47 @@
-FROM php:8.2-apache
+FROM php:8.3-fpm-alpine
 
-# ដំឡើង Extensions ចាំបាច់សម្រាប់ Laravel
-RUN apt-get update && apt-get install -y \
+# ដំឡើង dependencies ប្រព័ន្ធ និង Linux Packages ដែល Laravel 13 ត្រូវការ
+RUN apk add --no-cache \
+    nginx \
+    supervisor \
+    curl \
     libpng-dev \
-    libjpeg-dev \
-    libfreetype6-dev \
+    libxml2-dev \
+    libzip-dev \
     zip \
     unzip \
-    git \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install gd pdo pdo_mysql
+    nodejs \
+    npm \
+    icu-dev \
+    oniguruma-dev
 
-# បើកដំណើរការ Apache Rewrite Module សម្រាប់ Route របស់ Laravel
-RUN a2enmod rewrite
+# ដំឡើង PHP extensions ឱ្យបានគ្រប់គ្រាន់ (រួមទាំង intl និង mbstring)
+RUN docker-php-ext-configure intl && \
+    docker-php-ext-install pdo_mysql bcmath gd zip opcache intl mbstring
 
-# កំណត់ Document Root របស់ Apache ទៅកាន់ Folder public របស់ Laravel
-ENV APACHE_DOCUMENT_ROOT /var/www/html/public
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
-RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf
+# យក Composer ជំនាន់ចុងក្រោយមកប្រើ
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# ផ្លាស់ប្ដូរទីតាំងការងារទៅក្នុង Server
+# កំណត់ Working directory
 WORKDIR /var/www/html
+
+# ចម្លងឯកសារ composer ទៅមុនដើម្បីទាញយក packages (ជួយឱ្យ build លឿនជាងមុន)
+COPY composer.json composer.lock ./
+
+# រត់ composer install ដោយបន្ថែម --no-scripts ដើម្បីកុំឱ្យវាទាក់ error ពេល build
+RUN composer install --no-dev --optimize-autoloader --no-interaction --no-scripts
+
+# ចម្លងកូដគម្រោងទាំងអស់ចូល
 COPY . .
 
-# ដំឡើង Composer 
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+# ដំឡើង និង Build Frontend (Vite)
+RUN npm install && npm run build
 
-# ដំឡើង Packages និងបិទការឆែក Platform រំខាន
-RUN composer install --no-dev --optimize-autoloader --ignore-platform-reqs
-
-# កំណត់សិទ្ធិ Permissions លើ Folder ផ្ទុកទិន្នន័យ  
+# កំណត់សិទ្ធិ (Permissions) ទៅលើ folder របស់ Laravel
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 
+# បើក Port 80
 EXPOSE 80
+
+# ដំណើរការទិន្នន័យ (migrations) និង start server ពេល deploy
+CMD php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=80
