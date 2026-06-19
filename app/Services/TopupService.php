@@ -64,32 +64,39 @@ class TopupService
         }
     }
 
+    /**
+     * 🛒 មុខងារបង្កើតលីងទូទាត់ KHQR (Dynamic System Support)
+     */
     public function buildKhqrCheckout(TopupOrder $order): array
     {
-        // 🚀 បង្ខំដាក់តម្លៃ Keys ផ្លូវការចូលទៅក្នុងកូដផ្ទាល់ ដើម្បីកុំឱ្យវាដេញរកពី Render Environment Variables នាំទាស់ទៀតបង
         $gatewayUrl = 'https://khqr.cc/api/payment/request';
         $profileId = 'tW6PHjgPyzISFi3KK22hKZ57rag1cWHS';
         $secretKey = 'zsFq7SWHV4gYFSAdfg2ud8WV747tBOei';
 
-        // 🚀 កូដការពារ (Safe Check)
         $orderNo = $order->order_no ?? ('TEMP_' . time() . '_' . Str::upper(Str::random(5)));
         $transactionId = $order->gateway_transaction_id ?: ('ORD_' . $orderNo . '_' . date('YmdHis'));
         
-        // ការពារតម្លៃ null និងបំប្លែងទៅជា String Decimal លេខពីរខ្ទង់ (e.g., "2.00")
         $amount = number_format((float) ($order->amount ?? 0), 2, '.', '');
         
-        // ការពារករណី player_id ឬ zone_id ទទេរ
         $playerId = $order->player_id ?? '0';
-        $zoneId = $order->zone_id ?? '0';
-        $remark = sprintf('MLBB|ID:%s|S:%s', $playerId, $zoneId);
+        $zoneId = $order->zone_id ?? '';
+
+        // 🎯 ដំណោះស្រាយគន្លឹះ៖ ទាញយកឈ្មោះកូដហ្គេមមកធ្វើជា Remark (Dynamic Remark)
+        $order->loadMissing('game');
+        $gameCode = strtoupper($order->game?->code ?? 'GAME');
+
+        if (!blank($zoneId)) {
+            $remark = sprintf('%s|ID:%s|S:%s', $gameCode, $playerId, $zoneId);
+        } else {
+            $remark = sprintf('%s|ID:%s', $gameCode, $playerId); // 🚀 សម្រាប់ Free Fire គឺទុកត្រឹមប៉ុណ្ណេះ មិនឱ្យទាស់ទិន្នន័យ
+        }
 
         $paymentData = [
             'transaction_id' => $transactionId,
             'amount' => $amount,
-            'remark' => $remark,
+            'remark' => substr($remark, 0, 50), // ធានាថាមិនលើសទម្រង់ប្រវែងដែលធនាគារទារ
         ];
 
-        // រត់ Hash ជាមួយតម្លៃសុវត្ថិភាព
         $paymentData['hash'] = sha1(
             $secretKey
             . $paymentData['transaction_id']
@@ -122,6 +129,9 @@ class TopupService
         ];
     }
 
+    /**
+     * 🔔 មុខងារបាញ់ដំណឹងទៅ Telegram (Dynamic Alerts for All Games)
+     */
     public function sendTelegramAlert(TopupOrder $order, string $event = 'created'): void
     {
         $botToken = config('services.telegram.bot_token');
@@ -134,24 +144,35 @@ class TopupService
         $order->loadMissing(['game', 'package']);
 
         $statusLabel = match ($event) {
-            'paid' => 'Payment received',
-            'success' => 'Order completed',
-            'failed' => 'Order failed',
-            default => 'New order created',
+            'paid' => 'Payment received 💰',
+            'success' => 'Order completed ✅',
+            'failed' => 'Order failed ❌',
+            default => 'New order created 🛒',
         };
 
-        $message = implode("\n", [
-            "MLBB Top-up Alert",
+        $gameName = $order->game?->name ?? 'Unknown Game';
+        
+        // 🎯 រៀបចំទម្រង់សារឱ្យទៅជា Dynamic បើគ្មាន Server ID ទេគឺលាក់មិនឱ្យបង្ហាញនាំញញេរញញៃឡើយ
+        $msgLines = [
+            "✨ {$gameName} Top-up Alert ✨",
             "Event: {$statusLabel}",
-            "Order: " . ($order->order_no ?? '-'),
-            "Game: " . ($order->game?->name ?? '-'),
+            "Order No: " . ($order->order_no ?? '-'),
             "Package: " . ($order->package?->name ?? '-') . " (" . ($order->diamond_amount ?? 0) . " Diamonds)",
             "Player ID: " . ($order->player_id ?? '-'),
-            "Username: " . ($order->player_username ?: '-'),
-            "Server ID: " . ($order->zone_id ?? '-'),
-            "Amount: " . ($order->amount ?? '0.00'),
-            "Status: " . ($order->status ?? 'pending'),
-        ]);
+        ];
+
+        if ($order->player_username) {
+            $msgLines[] = "Username: " . $order->player_username;
+        }
+
+        if (!blank($order->zone_id)) {
+            $msgLines[] = "Server ID: " . $order->zone_id;
+        }
+
+        $msgLines[] = "Amount: $" . number_format((float)($order->amount ?? 0), 2);
+        $msgLines[] = "Status: " . strtoupper($order->status ?? 'pending');
+
+        $message = implode("\n", $msgLines);
 
         try {
             Http::timeout(10)->post("https://api.telegram.org/bot{$botToken}/sendMessage", [
