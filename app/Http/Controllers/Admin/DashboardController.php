@@ -74,8 +74,11 @@ class DashboardController extends Controller
     /**
      * 🔄 3. មុខងារថ្មី៖ កែប្រែ/បច្ចុប្បន្នភាពព័ត៌មានហ្គេម (Update Game)
      */
-    public function updateGame(Request $request, TopupGame $game): JsonResponse
+public function updateGame(Request $request, $id): JsonResponse
     {
+        // 🎯 ដំណោះស្រាយគន្លឹះ៖ បង្ខំឱ្យស្វែងរកតាម ID (Primary Key) នៅក្នុង Database ចំៗតែម្ដង ទោះផ្ទាំង Shop ជាប់ច្បាប់ binding ផ្សេងក៏ដោយ
+        $game = \App\Models\TopupGame::query()->findOrFail($id);
+
         // ឆែក Validation (អនុញ្ញាតឱ្យរក្សាទុក code ដដែលបាន ដោយមិនទាស់ unique class id ខ្លួនឯង)
         $validated = $request->validate([
             'code' => ['required', 'string', 'max:191', 'regex:/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/', 'unique:topup_games,code,' . $game->id],
@@ -86,7 +89,7 @@ class DashboardController extends Controller
         $game->update([
             'code' => strtolower(trim($validated['code'])),
             'name' => trim($validated['name']),
-            'is_active' => $request->boolean('is_active'),
+            'is_active' => $request->has('is_active') ? $request->boolean('is_active') : $game->is_active,
         ]);
 
         return response()->json([
