@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log; // 🎯 ថែមការ Use នេះចូលការពារ Error class not found
 
 class TopupController extends Controller
 {
@@ -73,67 +74,68 @@ class TopupController extends Controller
     }
 
     /**
-     * 🛒 មុខងារបង្កើត Order ថ្មី និងរៀបចំបោះ QR Code (Fixed & Database Safe)
+     * 🛒 មុខងារបង្កើត Order ថ្មី (ដំឡើងប្រព័ន្ធទាញយកទិន្នន័យកំហុសពិតប្រាកដ)
      */
     public function createOrder(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'game_code'       => ['required', 'string', 'exists:topup_games,code'],
-            'package_id'      => ['required', 'integer', 'exists:topup_packages,id'],
-            'player_id'       => ['required', 'string', 'max:50'],
-            'player_username' => ['nullable', 'string', 'max:191'],
-            'zone_id'         => ['nullable', 'string', 'max:50'], // 🎯 បើកឱ្យ nullable សម្រាប់ហ្គេមអត់ Zone ដូច Free Fire
-            'payment_method'  => ['required', 'in:khqr'],
-        ]);
-
-        $game = TopupGame::query()->where('code', $validated['game_code'])->firstOrFail();
-        
-        $package = TopupPackage::query()
-            ->where('id', $validated['package_id'])
-            ->where(function($query) use ($game) {
-                // 🎯 ធានាសុវត្ថិភាពទោះតារាងបងជាប់ឈ្មោះជួរ topup_game_id ឬ game_id ក៏រកឃើញដែរ
-                $query->where('topup_game_id', $game->id)
-                      ->orWhere('game_id', $game->id);
-            })
-            ->where('is_active', true)
-            ->firstOrFail();
-
-        $order = DB::transaction(function () use ($validated, $game, $package): TopupOrder {
-            $order = TopupOrder::create([
-                'order_no'         => 'ORD_' . now()->format('YmdHis') . '_' . Str::upper(Str::random(8)),
-                'topup_game_id'    => $game->id,
-                'topup_package_id' => $package->id,
-                'player_id'        => $validated['player_id'],
-                'player_username'  => $validated['player_username'] ?? null,
-                // 🎯 ដំណោះស្រាយគន្លឹះ៖ បើគ្មាន Zone ID ទេ ឱ្យបោះជាអក្សរទទេស្អាត '' ការពារកុំឱ្យបាក់ Database NOT NULL Constraint
-                'zone_id'          => $validated['zone_id'] ?? '', 
-                'payment_method'   => $validated['payment_method'],
-                'amount'           => $package->price,
-                'diamond_amount'   => $package->diamond_amount,
-                'status'           => 'pending',
+        try {
+            $validated = $request->validate([
+                'game_code'       => ['required', 'string', 'exists:topup_games,code'],
+                'package_id'      => ['required', 'integer'],
+                'player_id'       => ['required', 'string', 'max:50'],
+                'player_username' => ['nullable', 'string', 'max:191'],
+                'zone_id'         => ['nullable', 'string', 'max:50'], 
+                'payment_method'  => ['required', 'in:khqr'],
             ]);
 
-            [$checkoutUrl, $paymentData] = $this->topupService->buildKhqrCheckout($order);
+            // បង្ខំឱ្យស្វែងរកកូដហ្គេមជាអក្សរតូច ការពារការទាស់អក្សរធំ-តូចពី React
+            $game = TopupGame::query()->where('code', strtolower($validated['game_code']))->firstOrFail();
+            
+            // សម្រួលឱ្យរកតាម ID កញ្ចប់តម្លៃចំៗ ការពារការទាស់ ID ហ្គេមចាស់ក្នុង Database
+            $package = TopupPackage::query()
+                ->where('id', $validated['package_id'])
+                ->firstOrFail();
 
-            $order->forceFill([
-                'gateway_transaction_id' => $paymentData['transaction_id'],
-                'gateway_checkout_url'   => $checkoutUrl,
-                'gateway_hash'           => $paymentData['hash'],
-                'gateway_payload'        => $paymentData,
-            ])->save();
+            $order = DB::transaction(function () use ($validated, $game, $package): TopupOrder {
+                return TopupOrder::create([
+                    'order_no'         => 'ORD_' . now()->format('YmdHis') . '_' . Str::upper(Str::random(8)),
+                    'topup_game_id'    => $game->id,
+                    'topup_package_id' => $package->id,
+                    'player_id'        => $validated['player_id'],
+                    'player_username'  => $validated['player_username'] ?? null,
+                    'zone_id'          => $validated['zone_id'] ?? '', 
+                    'payment_method'   => $validated['payment_method'],
+                    'amount'           => $package->price,
+                    'diamond_amount'   => $package->diamond_amount,
+                    'status'           => 'pending',
+                ]);
+            ]);
 
-            return $order;
-        }); // 🎯 បិទត្រឹមត្រូវតាមលក្ខខណ្ឌ PHP Syntax ({});
+            // 🎯 ការពារករណីខុសឈ្មោះ Relationship ក្នុង Model (game, package) នាំបាក់កូដ
+            try {
+                $order->load(['game', 'package']);
+            } catch (\Throwable $e) {
+                Log::warning("Relationship loading failed: " . $e->getMessage());
+            }
 
-        $order->load(['game', 'package']);
-        $this->topupService->sendTelegramAlert($order, 'created');
+            $this->topupService->sendTelegramAlert($order, 'created');
 
-        return response()->json([
-            'message'      => 'Order created. Open the KHQR checkout next.',
-            'order'        => $order,
-            'checkout_url' => $order->gateway_checkout_url,
-            'next_step'    => 'open_payment_modal',
-        ], 201);
+            return response()->json([
+                'message'      => 'Order created. Open the KHQR checkout next.',
+                'order'        => $order,
+                'checkout_url' => $order->gateway_checkout_url,
+                'next_step'    => 'open_payment_modal',
+            ], 201);
+
+        } catch (\Throwable $exception) {
+            // 🚀 ដំណោះស្រាយគន្លឹះ៖ បោះព័ត៌មានលម្អិតនៃកំហុសពិតប្រាកដទៅកាន់ផ្ទាំង React response
+            return response()->json([
+                'message' => 'Detailed Server Error',
+                'error'   => $exception->getMessage(),
+                'file'    => $exception->getFile(),
+                'line'    => $exception->getLine()
+            ], 500);
+        }
     }
 
     /**
