@@ -11,7 +11,7 @@ Route::prefix('topup')->group(function () {
     Route::post('/check-username', [TopupController::class, 'checkUsername'])->name('api.topup.check-username');
     Route::post('/orders', [TopupController::class, 'createOrder'])->name('api.topup.orders.store');
     Route::get('/orders/{order}', [TopupController::class, 'showOrder'])->name('api.topup.orders.show');
-    Route::post('/orders/{order}/checkout', [TopupController::class, 'generateCheckout'])->name('api.topup.orders.checkout');
+    Route::get('/orders/{order}/checkout', [TopupController::class, 'generateCheckout'])->name('api.topup.orders.checkout');
     Route::post('/khqr/webhook', [TopupController::class, 'khqrWebhook'])->name('api.topup.khqr.webhook');
 });
 
