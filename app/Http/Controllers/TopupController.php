@@ -109,7 +109,7 @@ class TopupController extends Controller
                     'diamond_amount'   => $package->diamond_amount,
                     'status'           => 'pending',
                 ]);
-            ]);
+            });
 
             // 🎯 ការពារករណីខុសឈ្មោះ Relationship ក្នុង Model (game, package) នាំបាក់កូដ
             try {
