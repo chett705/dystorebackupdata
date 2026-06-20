@@ -22,19 +22,23 @@ Route::prefix('admin')->group(function () {
     // 🛡️ ក្រុមកូដការពារដោយ Middleware (Admin Token)
     Route::middleware('admin.token')->group(function () {
         Route::post('/logout', [AdminAuthController::class, 'logout'])->name('api.admin.logout');
-        
+
         // 📊 Dashboard Overview
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('api.admin.dashboard');
-        
+
         // 🎮 គ្រប់គ្រង Games (គាំទ្រទាំង បង្កើតថ្មី និង កែប្រែ/Update)
         Route::post('/games', [DashboardController::class, 'storeGame'])->name('api.admin.games.store');
         Route::patch('/games/{game}', [DashboardController::class, 'updateGame'])->name('api.admin.games.update'); // 🎯 ថែមផ្លូវនេះដើម្បីអាច Update Game បានបង
-        
+
         // 📦 គ្រប់គ្រង Packages (គាំទ្រទាំង បង្កើតថ្មី និង កែប្រែ/Update)
         Route::post('/packages', [DashboardController::class, 'storePackage'])->name('api.admin.packages.store');
         Route::patch('/packages/{package}', [DashboardController::class, 'updatePackage'])->name('api.admin.packages.update');
-        
+
         // 🔄 គ្រប់គ្រង Orders (កែប្រែស្ថានភាព Status និង Player Username)
         Route::patch('/orders/{order}', [DashboardController::class, 'updateOrder'])->name('api.admin.orders.update');
+        Route::patch('/orders/{order}', [DashboardController::class, 'updateOrder'])->name('api.admin.orders.update');
+
+       
+        Route::post('/admin/orders/{id}/manual-verify', [TopupController::class, 'manualVerifyOrder']);
     });
 });

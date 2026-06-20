@@ -10,7 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Log; // 🎯 ថែមការ Use នេះចូលការពារ Error class not found
+use Illuminate\Support\Facades\Log;
 
 class TopupController extends Controller
 {
@@ -19,7 +19,7 @@ class TopupController extends Controller
     }
 
     /**
-     * 📜 ទាញយកបញ្ជីហ្គេម និងកញ្ចប់តម្លៃដែលបើកដំណើរការ (Active Catalog)
+     * 📜 ទាញយកបញ្ជីហ្គេម និងកញ្ចប់តម្លៃដែលបើកដំណើរការ
      */
     public function catalog(): JsonResponse
     {
@@ -37,9 +37,8 @@ class TopupController extends Controller
     /**
      * 🎮 បង្ហាញព័ត៌មានលម្អិតនៃហ្គេមមួយ
      */
-   public function showGame($idOrCode): JsonResponse
+    public function showGame($idOrCode): JsonResponse
     {
-        // 🎯 ដំណោះស្រាយគន្លឹះ៖ ស្វែងរកតាម ID បើជាលេខ ឬស្វែងរកតាម Code បើជាអក្សរ
         $game = TopupGame::query()
             ->where('id', $idOrCode)
             ->orWhere('code', $idOrCode)
@@ -53,7 +52,7 @@ class TopupController extends Controller
     }
 
     /**
-     * 🔍 មុខងារពិនិត្យមើលឈ្មោះអ្នកលេង (Check Game Username)
+     * 🔍 មុខងារពិនិត្យមើលឈ្មោះអ្នកលេង
      */
     public function checkUsername(Request $request): JsonResponse
     {
@@ -80,10 +79,7 @@ class TopupController extends Controller
     }
 
     /**
-     * 🛒 មុខងារបង្កើត Order ថ្មី (ដំឡើងប្រព័ន្ធទាញយកទិន្នន័យកំហុសពិតប្រាកដ)
-     */
-   /**
-     * 🛒 មុខងារបង្កើត Order ថ្មី និងរៀបចំបោះ QR Code (ជាមួយប្រព័ន្ធឆែកកំហុសដាច់ខាត)
+     * 🛒 មុខងារបង្កើត Order ថ្មី និងរៀបចំបោះ QR Code
      */
     public function createOrder(Request $request): JsonResponse
     {
@@ -97,15 +93,12 @@ class TopupController extends Controller
                 'payment_method'  => ['required', 'in:khqr'],
             ]);
 
-            // បង្ខំឱ្យស្វែងរកកូដហ្គេមជាអក្សរតូច ការពារការទាស់អក្សរធំ-តូចពី React
             $game = TopupGame::query()->where('code', strtolower($validated['game_code']))->firstOrFail();
             
-            // សម្រួលឱ្យរកតាម ID កញ្ចប់តម្លៃចំៗ ការពារការទាស់ ID ហ្គេមចាស់ក្នុង Database
             $package = TopupPackage::query()
                 ->where('id', $validated['package_id'])
                 ->firstOrFail();
 
-            // 🎯 ចាប់ផ្ដើមបង្កើតទិន្នន័យ និងរៀបចំ QR Checkout ក្នុង Transaction តែមួយ
             $order = DB::transaction(function () use ($validated, $game, $package): TopupOrder {
                 $createdOrder = TopupOrder::create([
                     'order_no'         => 'ORD_' . now()->format('YmdHis') . '_' . Str::upper(Str::random(8)),
@@ -120,20 +113,18 @@ class TopupController extends Controller
                     'status'           => 'pending',
                 ]);
 
-                // 🚀 រៀបចំបាញ់បង្កើតលីងទូទាត់ភ្លាមៗនៅទីនេះ ដើម្បីធានាថាមាន Checkout URL ជានិច្ច
                 [$checkoutUrl, $paymentData] = $this->topupService->buildKhqrCheckout($createdOrder);
 
                 $createdOrder->forceFill([
-                    'gateway_transaction_id' => $paymentData['transaction_id'],
+                    'gateway_transaction_id' => $paymentData['transaction_id'] ?? $createdOrder->order_no,
                     'gateway_checkout_url'   => $checkoutUrl,
-                    'gateway_hash'           => $paymentData['hash'],
+                    'gateway_hash'           => $paymentData['hash'] ?? null,
                     'gateway_payload'        => $paymentData,
                 ])->save();
 
                 return $createdOrder;
             });
 
-            // ការពារក្រែងលោខុសឈ្មោះ Relationship ក្នុង Model (game, package) នាំបាក់កូដ
             try {
                 $order->load(['game', 'package']);
             } catch (\Throwable $e) {
@@ -150,7 +141,6 @@ class TopupController extends Controller
             ], 201);
 
         } catch (\Throwable $exception) {
-            // 🚀 ដំណោះស្រាយគន្លឹះ៖ បើមានកំហុស SQL ឬបាក់កូដត្រង់ណា គឺវាបោះអក្សរប្រាប់ចំៗតែម្ដង លែងលោតលាក់ពាក្យ Server Error ទៀតហើយ
             return response()->json([
                 'message' => 'Detailed Server Exception Error',
                 'error'   => $exception->getMessage(),
@@ -173,7 +163,7 @@ class TopupController extends Controller
     }
 
     /**
-     * 🔄 បង្កើតលីង Checkout សារជាថ្មី (ករណីចង់បាញ់ទូទាត់បន្ត)
+     * 🔄 បង្កើតលីង Checkout សារជាថ្មី
      */
     public function generateCheckout(TopupOrder $order): JsonResponse
     {
@@ -187,9 +177,9 @@ class TopupController extends Controller
         [$checkoutUrl, $paymentData] = $this->topupService->buildKhqrCheckout($order);
 
         $order->forceFill([
-            'gateway_transaction_id' => $paymentData['transaction_id'],
+            'gateway_transaction_id' => $paymentData['transaction_id'] ?? $order->order_no,
             'gateway_checkout_url'   => $checkoutUrl,
-            'gateway_hash'           => $paymentData['hash'],
+            'gateway_hash'           => $paymentData['hash'] ?? null,
             'gateway_payload'        => $paymentData,
         ])->save();
 
@@ -205,6 +195,8 @@ class TopupController extends Controller
      */
     public function khqrWebhook(Request $request): JsonResponse
     {
+        Log::info('KHQR Webhook received payload:', $request->all());
+
         $validated = $request->validate([
             'transaction_id' => ['required', 'string'],
             'status'         => ['required', 'string'],
@@ -212,28 +204,61 @@ class TopupController extends Controller
             'hash'           => ['nullable', 'string'],
         ]);
 
+        // 🎯 ដំណោះស្រាយការពារ៖ ឆែករកតាម gateway_transaction_id បើរកមិនឃើញ ឆែករកតាម order_no បន្ត
         $order = TopupOrder::query()
             ->where('gateway_transaction_id', $validated['transaction_id'])
-            ->firstOrFail();
+            ->orWhere('order_no', $validated['transaction_id'])
+            ->first();
 
-        if (in_array(strtolower($validated['status']), ['success', 'paid', 'completed'], true)) {
+        if (!$order) {
+            Log::error("Webhook Error: Order not found for Transaction ID: " . $validated['transaction_id']);
+            return response()->json(['message' => 'Order not found'], 404);
+        }
+
+        return $this->processOrderFulfillment($order, $validated['status'], $validated);
+    }
+
+    /**
+     * 🛠️ មុខងារថ្មី៖ សម្រាប់ឱ្យ Admin ចុចកែប្រែស្ថានភាពដោយដៃផ្ទាល់ពី Admin Panel (ឬប្រើតេស្តសាកល្បង)
+     * វិធីនេះដោះស្រាយបញ្ហា "Status only pending" ពេលកំពុង Dev បានភ្លាមៗ!
+     */
+    public function manualVerifyOrder(Request $request, $id): JsonResponse
+    {
+        $order = TopupOrder::findOrFail($id);
+        
+        // ឆែកមើល បើវា pending មែន បង្ខំឱ្យវាប្រែទៅជា Success រុញ Diamonds ទៅឱ្យហ្គេមហ្មង
+        if (in_array($order->status, ['pending', 'failed'])) {
+            return $this->processOrderFulfillment($order, 'success', ['manual' => true]);
+        }
+
+        return response()->json([
+            'message' => 'Order is already processed.',
+            'order' => $order->load(['game', 'package'])
+        ]);
+    }
+
+    /**
+     * 🔐 Helper Function: រៀបចំកិច្ចការបូមលុយ និងរុញ Diamonds ទៅ API Supplier
+     */
+    private function processOrderFulfillment(TopupOrder $order, string $status, array $payload): JsonResponse
+    {
+        if (in_array(strtolower($status), ['success', 'paid', 'completed'], true)) {
+            
+            // ១. ដំឡើងទៅ paid និង processing
             $order->forceFill([
-                'status'  => 'paid',
+                'status'  => 'success', // កែទៅតាម column របស់បង ករណីបងប្រើ status ជារួម
                 'paid_at' => now(),
-            ])->save();
-
-            $order->forceFill([
-                'status'        => 'processing',
                 'processing_at' => now(),
             ])->save();
 
+            // ២. បាញ់បញ្ជូន Diamonds ទៅឱ្យអតិថិជនពិតប្រាកដតាម API របស់ Supplier
             $supplierResult = $this->topupService->simulateSupplierFulfillment($order->fresh(['game', 'package']));
 
-            if ($supplierResult['success']) {
+            if (isset($supplierResult['success']) && $supplierResult['success']) {
                 $order->forceFill([
                     'status'            => 'success',
                     'success_at'        => now(),
-                    'supplier_order_id' => $supplierResult['supplier_order_id'],
+                    'supplier_order_id' => $supplierResult['supplier_order_id'] ?? null,
                     'supplier_payload'  => $supplierResult,
                 ])->save();
 
@@ -257,9 +282,9 @@ class TopupController extends Controller
 
             $this->topupService->sendTelegramAlert($order->fresh(['game', 'package']), 'failed');
         }
-    
+
         return response()->json([
-            'message' => 'Webhook processed.',
+            'message' => 'Order fulfillment processed status updated.',
             'order'   => $order->fresh(['game', 'package']),
         ]);
     }
