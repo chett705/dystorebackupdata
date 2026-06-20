@@ -12,8 +12,10 @@ Route::prefix('topup')->group(function () {
     Route::post('/orders', [TopupController::class, 'createOrder'])->name('api.topup.orders.store');
     Route::get('/orders/{order}', [TopupController::class, 'showOrder'])->name('api.topup.orders.show');
     Route::get('/orders/{order}/checkout', [TopupController::class, 'generateCheckout'])->name('api.topup.orders.checkout');
-    Route::post('/khqr/webhook', [TopupController::class, 'khqrWebhook'])->name('api.topup.khqr.webhook');
+    
 });
+
+Route::post('/khqr/webhook', [TopupController::class, 'khqrWebhook'])->name('api.topup.khqr.webhook');
 
 Route::prefix('admin')->group(function () {
     // 🔐 Route សម្រាប់ Login Admin
