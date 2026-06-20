@@ -40,5 +40,7 @@ Route::prefix('admin')->group(function () {
 
        
         Route::post('/admin/orders/{id}/manual-verify', [TopupController::class, 'manualVerifyOrder']);
+
+        Route::delete('/admin/orders/{id}', [\App\Http\Controllers\TopupController::class, 'destroyOrder']);
     });
 });
