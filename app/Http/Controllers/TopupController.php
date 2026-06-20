@@ -8,7 +8,7 @@ use App\Models\TopupPackage;
 use App\Services\TopupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 
@@ -79,7 +79,7 @@ class TopupController extends Controller
     }
 
     /**
-     * 🛒 មុខងារបង្កើត Order ថ្មី និងរៀបចំបោះ QR Code
+     * 🛒 មុខងារបង្កើតលីង QR (មិនទាន់រក្សាទុកក្នុង Database ទេ)
      */
     public function createOrder(Request $request): JsonResponse
     {
@@ -94,58 +94,51 @@ class TopupController extends Controller
             ]);
 
             $game = TopupGame::query()->where('code', strtolower($validated['game_code']))->firstOrFail();
+            $package = TopupPackage::query()->where('id', $validated['package_id'])->firstOrFail();
+
+            // 🎯 បង្កើតម៉ូដែលបណ្ដោះអាសន្ន (Temporary Instance)
+            $tempOrder = new TopupOrder([
+                'order_no'         => 'ORD_' . now()->format('YmdHis') . '_' . Str::upper(Str::random(8)),
+                'topup_game_id'    => $game->id,
+                'topup_package_id' => $package->id,
+                'player_id'        => $validated['player_id'],
+                'player_username'  => $validated['player_username'] ?? null,
+                'zone_id'          => $validated['zone_id'] ?? '', 
+                'payment_method'   => $validated['payment_method'],
+                'amount'           => $package->price,
+                'diamond_amount'   => $package->diamond_amount,
+                'status'           => 'pending',
+            ]);
+
+            // 🚀 បាញ់សុំលីង QR ពីធនាគារ
+            [$checkoutUrl, $paymentData] = $this->topupService->buildKhqrCheckout($tempOrder);
             
-            $package = TopupPackage::query()
-                ->where('id', $validated['package_id'])
-                ->firstOrFail();
+            $transactionId = $paymentData['transaction_id'] ?? $tempOrder->order_no;
 
-            $order = DB::transaction(function () use ($validated, $game, $package): TopupOrder {
-                $createdOrder = TopupOrder::create([
-                    'order_no'         => 'ORD_' . now()->format('YmdHis') . '_' . Str::upper(Str::random(8)),
-                    'topup_game_id'    => $game->id,
-                    'topup_package_id' => $package->id,
-                    'player_id'        => $validated['player_id'],
-                    'player_username'  => $validated['player_username'] ?? null,
-                    'zone_id'          => $validated['zone_id'] ?? '', 
-                    'payment_method'   => $validated['payment_method'],
-                    'amount'           => $package->price,
-                    'diamond_amount'   => $package->diamond_amount,
-                    'status'           => 'pending',
-                ]);
-
-                [$checkoutUrl, $paymentData] = $this->topupService->buildKhqrCheckout($createdOrder);
-
-                $createdOrder->forceFill([
-                    'gateway_transaction_id' => $paymentData['transaction_id'] ?? $createdOrder->order_no,
-                    'gateway_checkout_url'   => $checkoutUrl,
-                    'gateway_hash'           => $paymentData['hash'] ?? null,
-                    'gateway_payload'        => $paymentData,
-                ])->save();
-
-                return $createdOrder;
-            });
-
-            try {
-                $order->load(['game', 'package']);
-            } catch (\Throwable $e) {
-                Log::warning("Relationship loading failed: " . $e->getMessage());
-            }
-
-            $this->topupService->sendTelegramAlert($order, 'created');
+            // 🎯 រក្សាទុកព័ត៌មានទិញចូលទៅក្នុង Cache បណ្ដោះអាសន្នរយៈពេល ៣០នាទី (ទុកដេញចាប់វគ្គបង់លុយ)
+            Cache::put('temp_order_' . $transactionId, [
+                'order_no'         => $tempOrder->order_no,
+                'topup_game_id'    => $game->id,
+                'topup_package_id' => $package->id,
+                'player_id'        => $validated['player_id'],
+                'player_username'  => $validated['player_username'] ?? null,
+                'zone_id'          => $validated['zone_id'] ?? '',
+                'amount'           => $package->price,
+                'diamond_amount'   => $package->diamond_amount,
+                'hash'             => $paymentData['hash'] ?? null,
+                'payload'          => $paymentData
+            ], now()->addMinutes(30));
 
             return response()->json([
-                'message'      => 'Order created. Open the KHQR checkout next.',
-                'order'        => $order,
-                'checkout_url' => $order->gateway_checkout_url,
-                'next_step'    => 'open_payment_modal',
+                'message'      => 'KHQR generated successfully. Order is pending payment.',
+                'order'        => $tempOrder,
+                'checkout_url' => $checkoutUrl,
             ], 201);
 
         } catch (\Throwable $exception) {
             return response()->json([
-                'message' => 'Detailed Server Exception Error',
-                'error'   => $exception->getMessage(),
-                'file'    => $exception->getFile(),
-                'line'    => $exception->getLine()
+                'message' => 'Failed to generate payment QR Code.',
+                'error'   => $exception->getMessage()
             ], 500);
         }
     }
@@ -156,136 +149,80 @@ class TopupController extends Controller
     public function showOrder(TopupOrder $order): JsonResponse
     {
         $order->load(['game', 'package']);
-
-        return response()->json([
-            'data' => $order,
-        ]);
-    }
-
-    /**
-     * 🔄 បង្កើតលីង Checkout សារជាថ្មី
-     */
-    public function generateCheckout(TopupOrder $order): JsonResponse
-    {
-        if ($order->status !== 'pending') {
-            return response()->json([
-                'message' => 'Checkout can only be generated for pending orders.',
-                'order' => $order,
-            ], 422);
-        }
-
-        [$checkoutUrl, $paymentData] = $this->topupService->buildKhqrCheckout($order);
-
-        $order->forceFill([
-            'gateway_transaction_id' => $paymentData['transaction_id'] ?? $order->order_no,
-            'gateway_checkout_url'   => $checkoutUrl,
-            'gateway_hash'           => $paymentData['hash'] ?? null,
-            'gateway_payload'        => $paymentData,
-        ])->save();
-
-        return response()->json([
-            'message'      => 'KHQR checkout generated successfully.',
-            'order'        => $order->fresh(['game', 'package']),
-            'checkout_url' => $checkoutUrl,
-        ]);
+        return response()->json(['data' => $order]);
     }
 
     /**
      * 🔔 ប្រព័ន្ធស្ទាក់ចាប់ការបាញ់លុយពីធនាគារ (KHQR Webhook)
+     * ➔ ទើបតែរក្សាទុក (Insert) ចូល Database ផ្លូវការជា "success" ពេលបង់លុយរួច
      */
     public function khqrWebhook(Request $request): JsonResponse
     {
-        Log::info('KHQR Webhook received payload:', $request->all());
+        Log::info('KHQR Webhook raw details:', $request->all());
 
         $validated = $request->validate([
             'transaction_id' => ['required', 'string'],
             'status'         => ['required', 'string'],
             'amount'         => ['nullable', 'numeric'],
-            'hash'           => ['nullable', 'string'],
         ]);
 
-        // 🎯 ដំណោះស្រាយការពារ៖ ឆែករកតាម gateway_transaction_id បើរកមិនឃើញ ឆែករកតាម order_no បន្ត
-        $order = TopupOrder::query()
-            ->where('gateway_transaction_id', $validated['transaction_id'])
-            ->orWhere('order_no', $validated['transaction_id'])
-            ->first();
+        $transactionId = $validated['transaction_id'];
 
-        if (!$order) {
-            Log::error("Webhook Error: Order not found for Transaction ID: " . $validated['transaction_id']);
-            return response()->json(['message' => 'Order not found'], 404);
+        // 🎯 ទាញយកទិន្នន័យបណ្ដោះអាសន្នចេញពី Cache មកពិនិត្យ
+        $cached = Cache::get('temp_order_' . $transactionId);
+
+        if (!$cached) {
+            Log::error("Webhook Error: Session expired or order not found for Transaction ID: " . $transactionId);
+            return response()->json(['message' => 'Order payload expired or not found'], 404);
         }
 
-        return $this->processOrderFulfillment($order, $validated['status'], $validated);
-    }
-
-    /**
-     * 🛠️ មុខងារថ្មី៖ សម្រាប់ឱ្យ Admin ចុចកែប្រែស្ថានភាពដោយដៃផ្ទាល់ពី Admin Panel (ឬប្រើតេស្តសាកល្បង)
-     * វិធីនេះដោះស្រាយបញ្ហា "Status only pending" ពេលកំពុង Dev បានភ្លាមៗ!
-     */
-    public function manualVerifyOrder(Request $request, $id): JsonResponse
-    {
-        $order = TopupOrder::findOrFail($id);
-        
-        // ឆែកមើល បើវា pending មែន បង្ខំឱ្យវាប្រែទៅជា Success រុញ Diamonds ទៅឱ្យហ្គេមហ្មង
-        if (in_array($order->status, ['pending', 'failed'])) {
-            return $this->processOrderFulfillment($order, 'success', ['manual' => true]);
-        }
-
-        return response()->json([
-            'message' => 'Order is already processed.',
-            'order' => $order->load(['game', 'package'])
-        ]);
-    }
-
-    /**
-     * 🔐 Helper Function: រៀបចំកិច្ចការបូមលុយ និងរុញ Diamonds ទៅ API Supplier
-     */
-    private function processOrderFulfillment(TopupOrder $order, string $status, array $payload): JsonResponse
-    {
-        if (in_array(strtolower($status), ['success', 'paid', 'completed'], true)) {
+        // ប្រសិនបើធនាគារបញ្ជាក់ថាបង់លុយរួចរាល់ពិតប្រាកដ
+        if (in_array(strtolower($validated['status']), ['success', 'paid', 'completed'], true)) {
             
-            // ១. ដំឡើងទៅ paid និង processing
-            $order->forceFill([
-                'status'  => 'success', // កែទៅតាម column របស់បង ករណីបងប្រើ status ជារួម
-                'paid_at' => now(),
-                'processing_at' => now(),
-            ])->save();
+            // 🎯 ចាប់ផ្ដើម Insert ចូល Database ផ្លូវការជារួមតែម្ដងបង!
+            $order = TopupOrder::create([
+                'order_no'               => $cached['order_no'],
+                'topup_game_id'          => $cached['topup_game_id'],
+                'topup_package_id'       => $cached['topup_package_id'],
+                'player_id'              => $cached['player_id'],
+                'player_username'        => $cached['player_username'],
+                'zone_id'                => $cached['zone_id'],
+                'payment_method'         => 'khqr',
+                'amount'                 => $cached['amount'],
+                'diamond_amount'         => $cached['diamond_amount'],
+                'status'                 => 'success', // 🎯 ចូលមកភ្លាមជោគជ័យភ្លាម!
+                'gateway_transaction_id' => $transactionId,
+                'gateway_hash'           => $cached['hash'],
+                'gateway_payload'        => $cached['payload'],
+                'paid_at'                => now(),
+                'success_at'             => now(),
+            ]);
 
-            // ២. បាញ់បញ្ជូន Diamonds ទៅឱ្យអតិថិជនពិតប្រាកដតាម API របស់ Supplier
-            $supplierResult = $this->topupService->simulateSupplierFulfillment($order->fresh(['game', 'package']));
+            // សម្អាត Cache ចោលកុំឱ្យស្ទះ
+            Cache::forget('temp_order_' . $transactionId);
+
+            // បាញ់បញ្ជូន Diamonds ទៅកាន់ Server ហ្គេមរបស់អតិថិជន
+            $supplierResult = $this->topupService->simulateSupplierFulfillment($order->load(['game', 'package']));
 
             if (isset($supplierResult['success']) && $supplierResult['success']) {
-                $order->forceFill([
-                    'status'            => 'success',
-                    'success_at'        => now(),
+                $order->update([
                     'supplier_order_id' => $supplierResult['supplier_order_id'] ?? null,
                     'supplier_payload'  => $supplierResult,
-                ])->save();
-
-                $this->topupService->sendTelegramAlert($order->fresh(['game', 'package']), 'success');
+                ]);
+                $this->topupService->sendTelegramAlert($order, 'success');
             } else {
-                $order->forceFill([
-                    'status'           => 'failed',
+                $order->update([
+                    'status'           => 'failed', // ករណីបង់លុយហើយ តែបាញ់ API ហ្គេមទៅធ្លាយកំហុស
                     'failed_at'        => now(),
-                    'failure_reason'   => $supplierResult['message'] ?? 'Supplier request failed.',
+                    'failure_reason'   => $supplierResult['message'] ?? 'Supplier API error.',
                     'supplier_payload' => $supplierResult,
-                ])->save();
-
-                $this->topupService->sendTelegramAlert($order->fresh(['game', 'package']), 'failed');
+                ]);
+                $this->topupService->sendTelegramAlert($order, 'failed');
             }
-        } else {
-            $order->forceFill([
-                'status'         => 'failed',
-                'failed_at'      => now(),
-                'failure_reason' => 'Payment gateway reported a non-success status.',
-            ])->save();
 
-            $this->topupService->sendTelegramAlert($order->fresh(['game', 'package']), 'failed');
+            return response()->json(['message' => 'Payment Success & Data Stored.', 'order' => $order]);
         }
 
-        return response()->json([
-            'message' => 'Order fulfillment processed status updated.',
-            'order'   => $order->fresh(['game', 'package']),
-        ]);
+        return response()->json(['message' => 'Payment status is non-success.'], 400);
     }
 }
