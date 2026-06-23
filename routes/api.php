@@ -18,6 +18,7 @@ Route::prefix('topup')->group(function () {
     Route::get('/orders/{order}', [TopupController::class, 'showOrder']);
     // ប្រសិនបើកូដនៅក្នុង routes/api.php មិនទាន់មាន Group 'topup' ទេ៖
 Route::post('/mlbb/check-id', [TopupController::class, 'checkUsername']);
+Route::post('/khqr/webhook', [TopupController::class, 'khqrWebhook']);
 });
 
 /*
