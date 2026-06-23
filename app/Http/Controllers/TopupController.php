@@ -171,30 +171,39 @@ class TopupController extends Controller
     }
 
     /**
-     * 🎯 Webhook ទទួលទិន្នន័យពីធនាគារនៅពេលស្កែនជោគជ័យ រួចបាញ់ពេជ្រពិតៗទៅ Flash Topup ស្វ័យប្រវត្តិ
+   /**
+     * 🎯 មុខងារទទួល Webhook ផ្លូវការ (រៀបចំឱ្យត្រូវជាមួយ /api/khqr/webhook របស់ Render)
      */
     public function khqrWebhook(Request $request): JsonResponse
     {
         Log::info('🎯 WEBHOOK HIT FROM BANK OR FLASH TOPUP:', $request->all());
 
         try {
-            // ឆែកមើលបើវាជា Webhook ផ្ញើមកពី Flash Topup (ករណី Callback ស្ថានភាពកម្មង់ពេជ្រ)
+            // ករណីទី១៖ Webhook ផ្ញើមកពី Flash Topup (Callback ស្ថានភាពកម្មង់ពេជ្រ)
             if ($request->has('event') && $request->has('reference_id')) {
                 $referenceId = $request->input('reference_id');
                 $orderStatus = $request->input('order_status');
 
                 $order = TopupOrder::where('order_no', $referenceId)->first();
-                if (!$order) return response()->json(['message' => 'Order not found'], 404);
+                if (!$order) {
+                    return response()->json(['message' => 'Order not found in system'], 404);
+                }
 
                 if (strtolower($orderStatus) === 'completed') {
-                    if ($order->status === 'success') return response()->json(['success' => true]);
-                    $order->update(['status' => 'success', 'paid_at' => now(), 'success_at' => now()]);
-                    return response()->json(['success' => true, 'message' => 'Fulfillment Completed via Webhook']);
+                    if ($order->status === 'success') {
+                        return response()->json(['success' => true, 'message' => 'Already success']);
+                    }
+                    $order->update([
+                        'status'     => 'success',
+                        'paid_at'    => now(),
+                        'success_at' => now()
+                    ]);
+                    return response()->json(['success' => true, 'message' => 'Fulfillment Completed via Flash Topup Webhook']);
                 }
                 return response()->json(['message' => 'Status handled', 'status' => $orderStatus]);
             }
 
-            // ករណី Webhook ផ្ញើមកពីប្រព័ន្ធធនាគារ (បង់លុយរួច រួចរុញទិន្នន័យទៅ Flash Topup)
+            // ករណីទី២៖ Webhook ផ្ញើមកពីប្រព័ន្ធធនាគារ (បង់លុយរួច រួចរុញទៅ Flash Topup)
             $validated = $request->validate([
                 'transaction_id' => ['required', 'string'],
                 'status'         => ['required', 'string'],
@@ -224,7 +233,7 @@ class TopupController extends Controller
                     'success_at' => now(),
                 ]);
 
-                // 🚀 ដំណើរការបាញ់ពេជ្រទៅកាន់ Flash Topup API ផ្លូវការ
+                // 🚀 ដំណើរការបាញ់ពេជ្រទៅកាន់ Flash Topup API
                 try {
                     $order->load(['game', 'package']);
                     $serviceCode = $order->package->sku ?? $order->package->code; 
