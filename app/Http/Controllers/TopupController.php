@@ -45,6 +45,8 @@ class TopupController extends Controller
     /**
      * 🎯 មុខងារ Check ID (កែសម្រួលតម្រង់ផ្លូវ Path ឱ្យត្រូវតាមស្តង់ដារ Plugin ផ្លូវការ)
      */
+    
+    
     public function checkUsername(Request $request): JsonResponse
     {
         $gameCode = $request->input('game_code') ?? $request->input('validation_code');
@@ -61,9 +63,9 @@ class TopupController extends Controller
             $timestamp = time(); 
             $nonce     = Str::random(16); 
 
-            // 🎯 កែសម្រួល៖ ប្តូរផ្លូវ Path មកជាលីងស្តង់ដារផ្លូវការ (គ្មាន reseller/v2)
+            // 🎯 ប្រើប្រាស់ផ្លូវលីង V1 ផ្លូវការរបស់ FlashTopUp
             $path = '/api/v1/check-id'; 
-            $method = 'GET';
+            $method = 'POST';
 
             $body = [
                 'server_id'       => trim($zoneId),
@@ -76,11 +78,11 @@ class TopupController extends Controller
 
             $rawJsonBody = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
-            // គណនា Signature តាមរូបមន្តខណ្ឌដោយសញ្ញា |
-            $payloadString = $method . '|' . $path . '|' . $timestamp . '|' . $nonce . '|' . $rawJsonBody;
+            // 🎯 គណនាតាមរូបមន្ត V1 ស្តង់ដារ (បូកអក្សរតគ្នាធម្មតា គ្មានសញ្ញា | និងគ្មានការ Hash Body ឡើយ)
+            $payloadString = $method . $path . $timestamp . $nonce . $rawJsonBody;
             $signature = hash_hmac('sha256', $payloadString, $secretKey);
 
-            // 🚀 បាញ់ទៅកាន់ FlashTopUp
+            // 🚀 បាញ់ទៅកាន់ FlashTopUp ដោយប្រើប្រាស់ POST
             $response = Http::withHeaders([
                 'Content-Type'    => 'application/json',
                 'X-FT-API-ID'     => $apiId,
@@ -109,30 +111,6 @@ class TopupController extends Controller
                         'raw_data'    => $apiData     
                     ]
                 ]);
-            }
-
-            // បើសិនជាលីង /api/v1/ មិនត្រូវ ឱ្យវាសាកល្បងលីងជំនួស /api/v2/ ភ្លាមៗ
-            if ($response->status() == 404) {
-                $path = '/api/v2/check-id';
-                $payloadString = $method . '|' . $path . '|' . $timestamp . '|' . $nonce . '|' . $rawJsonBody;
-                $signature = hash_hmac('sha256', $payloadString, $secretKey);
-
-                $response = Http::withHeaders([
-                    'Content-Type'    => 'application/json',
-                    'X-FT-API-ID'     => $apiId,
-                    'X-FT-Timestamp'  => $timestamp,
-                    'X-FT-Nonce'      => $nonce,
-                    'X-FT-Signature'  => $signature,
-                ])
-                ->withoutVerifying()
-                ->withBody($rawJsonBody, 'application/json')
-                ->post('https://api.flashtopup.com' . $path);
-                
-                if ($response->successful()) {
-                    $apiData = $response->json();
-                    $playerName = $apiData['account_name'] ?? $apiData['data']['account_name'] ?? null;
-                    return response()->json(['message' => 'Done', 'result' => ['player_name' => $playerName]]);
-                }
             }
 
             $errorData = $response->json();
