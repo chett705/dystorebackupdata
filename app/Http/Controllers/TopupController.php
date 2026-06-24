@@ -43,16 +43,11 @@ class TopupController extends Controller
     }
 
     /**
-     * 🎯 មុខងារ Check ID (កែសម្រួលតម្រង់ផ្លូវ Path ឱ្យត្រូវតាមស្តង់ដារ Plugin ផ្លូវការ)
-     */
-    
-    
-    /**
-     * 🎯 មុខងារ Check ID (ដំណោះស្រាយផ្ដាច់ព្រ័ត្រសម្រាប់ INVALID_SIGNATURE លើ Render)
+     * 🎯 មុខងារ Check ID (ដំណោះស្រាយផ្ដាច់ព្រ័ត្រ - ធានាត្រូវ Signature ១០០%)
      */
     public function checkUsername(Request $request): JsonResponse
     {
-        // ១. ចាប់យកតម្លៃទោះបីជាផ្ញើមកក្នុងឈ្មោះ Key ណាក៏ដោយ
+        // ទទួលយកតម្លៃទោះបីជាផ្ញើមកក្នុងឈ្មោះ Key ណាក៏ដោយ
         $gameCode = $request->input('game_code') ?? $request->input('validation_code');
         $playerId = $request->input('player_id') ?? $request->input('user_id');
         $zoneId   = $request->input('zone_id') ?? $request->input('server_id') ?? '';
@@ -70,21 +65,11 @@ class TopupController extends Controller
             $path = '/api/reseller/v2/check-id'; 
             $method = 'POST';
 
-            // ២. 🎯 បង្កើតកញ្ចប់ Body ថ្មីស្អាត ដោយប្រើឈ្មោះ Key ផ្លូវការរបស់ FlashTopUp
-            // និងបង្ខំឱ្យរៀបតាមលំដាប់តួអក្សរ A-Z ជានិច្ច (server_id -> user_id -> validation_code)
-            $body = [
-                'server_id'       => trim($zoneId),
-                'user_id'         => trim($playerId),
-                'validation_code' => strtolower(trim($gameCode)),
-            ];
+            // 🎯 បង្ហាប់តម្លៃទៅជាទម្រង់ JSON String គ្រាប់ស្ងួត ចងដៃ Key តាមលំដាប់ A-Z ដោយដៃផ្ទាល់
+            // វិធីនេះធានាថា JSON ចេញមកមានទ្រង់ទ្រាយដូច Postman ១០០% មិនប្រែប្រួលតាម Framework ឡើយ
+            $rawJsonBody = '{"server_id":"' . trim($zoneId) . '","user_id":"' . trim($playerId) . '","validation_code":"' . strtolower(trim($gameCode)) . '"}';
 
-            // តម្រៀប Key ពី A-Z ដើម្បីឱ្យដូចទៅនឹង Postman មុននេះបេះបិទ
-            ksort($body);
-
-            // បម្លែងជា JSON String គ្រាប់ស្ងួត គ្មាន Space ចន្លោះ
-            $rawJsonBody = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-
-            // ៣. 🎯 គណនា Signature តាមរូបមន្ត V2 (ខណ្ឌដោយសញ្ញា |) ដូច JavaScript លើ Postman 
+            // 🎯 គណនា Signature តាមរូបមន្ត V2 ខណ្ឌដោយសញ្ញា | បេះបិទដូច Postman Pre-request Script
             $payloadString = $method . '|' . $path . '|' . $timestamp . '|' . $nonce . '|' . $rawJsonBody;
             $signature = hash_hmac('sha256', $payloadString, $secretKey);
 
@@ -262,7 +247,7 @@ class TopupController extends Controller
                     'paid_at' => now(),
                 ]);
 
-                // 🚀 លំហូរបាញ់បញ្ជាទិញពេជ្រទៅកាន់ FlashTopUp
+                // 🚀 លំហូរបាញ់បញ្ជាទិញពេជ្រទៅកាន់ FlashTopUp ផ្លូវការ
                 try {
                     $order->load(['game', 'package']);
                     $serviceCode = $order->package->sku ?? $order->package->code; 
@@ -271,21 +256,11 @@ class TopupController extends Controller
                     $flashSecret = trim(env('FLASH_TOPUP_SECRET_KEY'));
                     $timestamp   = time(); 
                     $nonce       = Str::random(16);
-                    
-                    // 🎯 កែសម្រួល៖ តម្រង់ផ្លូវលីងការកុម្ម៉ង់ទិញទៅស្តង់ដារផ្លូវការ
-                    $path        = '/api/v1/orders'; 
+                    $path        = '/api/reseller/v2/order'; 
                     $method      = 'POST';
 
-                    $orderBody = [
-                        'quantity'     => 1,
-                        'reference_id' => $order->order_no, 
-                        'server_id'    => $order->zone_id,
-                        'service_code' => $serviceCode,
-                        'user_id'      => $order->player_id,
-                    ];
-
-                    ksort($orderBody);
-                    $orderJson = json_encode($orderBody, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                    // 🎯 បង្ហាប់ទិន្នន័យ ಆರ್ಡರ್ (Order) ជាទម្រង់ Manual String ដូចគ្នា ដើម្បីការពារដាច់ខាតរឿងខុស Signature
+                    $orderJson = '{"quantity":1,"reference_id":"' . trim($order->order_no) . '","server_id":"' . trim($order->zone_id) . '","service_code":"' . trim($serviceCode) . '","user_id":"' . trim($order->player_id) . '"}';
                     
                     $orderPayloadString = $method . '|' . $path . '|' . $timestamp . '|' . $nonce . '|' . $orderJson;
                     $orderSignature = hash_hmac('sha256', $orderPayloadString, $flashSecret);
@@ -304,20 +279,8 @@ class TopupController extends Controller
                     if ($flashResponse->successful()) {
                         Log::info("🚀 Flash Topup Fulfillment Success Initiated: {$order->order_no}", $flashResponse->json());
                     } else {
-                        // បើសិនជាលីង v1 មិនត្រូវ ឱ្យវាបាញ់ទៅ v2 ជំនួសភ្លាម
-                        if ($flashResponse->status() == 404) {
-                            $path = '/api/v2/orders';
-                            $orderPayloadString = $method . '|' . $path . '|' . $timestamp . '|' . $nonce . '|' . $orderJson;
-                            $orderSignature = hash_hmac('sha256', $orderPayloadString, $flashSecret);
-
-                            Http::withHeaders([
-                                'Content-Type'    => 'application/json',
-                                'X-FT-API-ID'     => $apiId,
-                                'X-FT-Timestamp'  => $timestamp,
-                                'X-FT-Nonce'      => $nonce,
-                                'X-FT-Signature'  => $orderSignature,
-                            ])->withoutVerifying()->withBody($orderJson, 'application/json')->post('https://api.flashtopup.com' . $path);
-                        }
+                        Log::error("❌ Flash Topup Fulfillment API Refused: {$order->order_no}", $flashResponse->json());
+                        $order->update(['status' => 'manual_hold']);
                     }
 
                 } catch (\Throwable $ex) {
