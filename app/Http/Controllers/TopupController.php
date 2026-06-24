@@ -310,6 +310,10 @@ class TopupController extends Controller
     private function generateFlashTopupSignature(string $method, string $path, int $timestamp, string $nonce, array $body): string
     {
         $secretKey = env('FLASH_TOPUP_SECRET_KEY');
+        
+        // 🎯 ដំណោះស្រាយ៖ តម្រៀប Keys ក្នុង Array ពី A-Z មុននឹងបម្លែងទៅជា JSON
+        ksort($body); 
+        
         $bodyJson  = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         $bodyHash  = hash('sha256', $bodyJson);
 
