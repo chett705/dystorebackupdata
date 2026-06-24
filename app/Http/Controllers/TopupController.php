@@ -43,7 +43,7 @@ class TopupController extends Controller
     }
 
     /**
-     * 🎯 មុខងារ Check ID (ផ្ទៀងផ្ទាត់ឈ្មោះគណនីហ្គេមពិតប្រាកដ)
+     * 🎯 មុខងារ Check ID (កែសម្រួលដោះស្រាយបញ្ហា INVALID_SIGNATURE ឱ្យត្រូវតាមស្តង់ដារ V2 ផ្លូវការ)
      */
     public function checkUsername(Request $request): JsonResponse
     {
@@ -61,14 +61,18 @@ class TopupController extends Controller
             $path = '/api/reseller/v2/check-id';
             $method = 'POST';
 
+            // 🎯 រៀបចំ Key ឱ្យត្រូវបេះបិទទៅនឹងរូបភាពឯកសារ Postman Body របស់ FlashTopUp
             $body = [
                 'user_id'         => trim($validated['player_id']),
                 'server_id'       => trim($validated['zone_id'] ?? ''),
                 'validation_code' => strtolower(trim($validated['game_code'])),
             ];
 
-            // ហៅ Private Function ដើម្បីផលិត Signature
+            // ហៅ Private Function ដើម្បីផលិត Signature ដែលមាន ksort រៀបលំដាប់រួចរាល់
             $signature = $this->generateFlashTopupSignature($method, $path, $timestamp, $nonce, $body);
+
+            // 🎯 រៀបចំ Body ផ្ញើទៅ ត្រូវតែរៀបលំដាប់លំដោយ Key ដូចពេលផលិត Signature ដែរ (ksort ដូចគ្នា)
+            ksort($body);
 
             $response = Http::withHeaders([
                 'Content-Type'    => 'application/json',
@@ -100,10 +104,8 @@ class TopupController extends Controller
             }
 
             $errorData = $response->json();
-            $errorMessage = $errorData['message'] ?? $errorData['error'] ?? 'API Rejected';
-
             return response()->json([
-                'message' => $errorMessage, 
+                'message' => $errorData['message']['message'] ?? $errorData['error']['message'] ?? 'API Rejected', 
                 'error' => $errorData
             ], 400);
 
@@ -165,11 +167,11 @@ class TopupController extends Controller
     {
         return response()->json(['data' => $order->load(['game', 'package'])]);
     }
-   
+
     /**
-     * 🎯 មុខងារទទួល Webhook រួម (ទទួលទាំង KHQR របស់ធនាគារ និង Callback របស់ FlashTopUp ក្នុងលីងតែមួយ)
+     * 🎯 មុខងារទទួល Webhook រួម (កែសម្រួលដោះស្រាយបញ្ហា Validation ជាប់គាំងរវាង FlashTopUp និង ធនាគារ)
      */
-   public function khqrWebhook(Request $request): JsonResponse
+    public function khqrWebhook(Request $request): JsonResponse
     {
         Log::info('🎯 WEBHOOK HIT FROM BANK OR FLASH TOPUP:', $request->all());
 
@@ -273,6 +275,9 @@ class TopupController extends Controller
 
                     $signature = $this->generateFlashTopupSignature($method, $path, $timestamp, $nonce, $body);
 
+                    // 🎯 រៀបចំលំដាប់លំដោយ Key របស់ Array Body ឱ្យត្រូវគ្នាជាមួយ Signature មុននឹងបាញ់ទៅក្រៅ
+                    ksort($body);
+
                     $flashResponse = Http::withHeaders([
                         'Content-Type'    => 'application/json',
                         'X-FT-API-ID'     => $apiId,
@@ -311,7 +316,7 @@ class TopupController extends Controller
     {
         $secretKey = env('FLASH_TOPUP_SECRET_KEY');
         
-        // 🎯 ដំណោះស្រាយ៖ តម្រៀប Keys ក្នុង Array ពី A-Z មុននឹងបម្លែងទៅជា JSON
+        // 🎯 តម្រៀប Keys ក្នុង Array ពី A-Z ឱ្យត្រូវតាមស្តង់ដារ JSON សុវត្ថិភាពរបស់គេ
         ksort($body); 
         
         $bodyJson  = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
