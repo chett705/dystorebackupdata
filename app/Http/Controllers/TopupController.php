@@ -76,69 +76,77 @@ class TopupController extends Controller
      */
     public function checkUsername(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'game_code' => ['required', 'string'],
-            'player_id' => ['required', 'string'],
-            'zone_id'   => ['nullable', 'string'],
-        ]);
+        // ទទួលយកទិន្នន័យទាំងអស់ដែលផ្ញើមក ទោះជាឈ្មោះ Key បែបណាក៏ដោយ
+        $gameCode = $request->input('game_code') ?? $request->input('validation_code');
+        $playerId = $request->input('player_id') ?? $request->input('user_id');
+        $zoneId   = $request->input('zone_id') ?? $request->input('server_id') ?? '';
+
+        if (!$gameCode || !$playerId) {
+            return response()->json(['message' => 'game_code/validation_code and player_id/user_id are required.'], 422);
+        }
 
         try {
-            $credentials = $this->flashTopupCredentials();
-            $apiId = $credentials['api_id'];
-            $secretKey = $credentials['secret_key'];
-            $timestamp = time();
-            $nonce = Str::random(16);
+            $apiId     = env('FLASH_TOPUP_API_ID', 'RSMNGJ90S66GU8IC');
+            $secretKey = env('FLASH_TOPUP_SECRET_KEY');
+            $timestamp = time(); 
+            $nonce     = Str::random(16); 
 
             $path = '/api/reseller/v2/check-id';
             $method = 'POST';
 
+            // 🎯 បង្កើត Body ទៅកាន់ FlashTopUp ដោយប្រើប្រាស់ឈ្មោះ Key ផ្លូវការរបស់គេ
             $body = [
-                'server_id'       => blank($validated['zone_id'] ?? null) ? null : trim($validated['zone_id']),
-                'user_id'         => trim($validated['player_id']),
-                'validation_code' => strtolower(trim($validated['game_code'])),
+                'server_id'       => trim($zoneId),
+                'user_id'         => trim($playerId),
+                'validation_code' => strtolower(trim($gameCode)),
             ];
 
-            $rawJsonBody = $this->canonicalFlashTopupBody($body);
-            if ($rawJsonBody === false) {
-                throw new \RuntimeException('Unable to encode FlashTopUp request body.');
-            }
+            // 🎯 តម្រៀប Key ពី A-Z បេះបិទតាមច្បាប់របស់ FlashTopUp V2 (server_id -> user_id -> validation_code)
+            ksort($body);
 
-            $signature = $this->flashTopupSignature($method, $path, $timestamp, $nonce, $rawJsonBody, (string) $secretKey);
+            // បម្លែងទៅជា JSON String គ្រាប់ស្ងួត គ្មាន Space ចន្លោះ
+            $rawJsonBody = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
+            // គណនា Signature
+            $bodyHash  = hash('sha256', $rawJsonBody);
+            $payloadString = $method . $path . $timestamp . $nonce . $bodyHash;
+            $signature = hash_hmac('sha256', $payloadString, $secretKey);
+
+            // 🚀 បាញ់ទៅកាន់ FlashTopUp ជាមួយ Raw JSON String ដើម
             $response = Http::withHeaders([
-                'Content-Type'   => 'application/json',
-                'X-FT-API-ID'    => $apiId,
-                'X-FT-Timestamp' => $timestamp,
-                'X-FT-Nonce'     => $nonce,
-                'X-FT-Signature' => $signature,
+                'Content-Type'    => 'application/json',
+                'X-FT-API-ID'     => $apiId,
+                'X-FT-Timestamp'  => $timestamp,
+                'X-FT-Nonce'      => $nonce,
+                'X-FT-Signature'  => $signature,
             ])
-            ->withoutVerifying()
+            ->withoutVerifying() 
             ->withBody($rawJsonBody, 'application/json')
             ->post('https://api.flashtopup.com' . $path);
 
             if ($response->successful()) {
                 $apiData = $response->json();
-
-                $playerName = $apiData['account_name']
-                              ?? $apiData['data']['account_name']
-                              ?? $apiData['player_name']
+                
+                $playerName = $apiData['account_name'] 
+                              ?? $apiData['data']['account_name'] 
+                              ?? $apiData['player_name'] 
                               ?? null;
 
                 return response()->json([
                     'message' => 'Done',
                     'result' => [
                         'player_name' => $playerName,
-                        'username' => $playerName,
-                        'name' => $playerName,
-                        'raw_data' => $apiData,
+                        'username'    => $playerName, 
+                        'name'        => $playerName, 
+                        'raw_data'    => $apiData     
                     ]
                 ]);
             }
 
             $errorData = $response->json();
             return response()->json([
-                'message' => $errorData['message']['message'] ?? $errorData['error']['message'] ?? 'API Rejected',
-                'error' => $errorData,
+                'message' => $errorData['message']['message'] ?? $errorData['error']['message'] ?? 'API Rejected', 
+                'error' => $errorData
             ], 400);
 
         } catch (\Throwable $e) {
