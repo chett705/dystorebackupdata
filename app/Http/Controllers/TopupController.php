@@ -167,7 +167,7 @@ class TopupController extends Controller
     }
 
     /**
-     * 🎯 មុខងារទទួល Webhook ផ្លូវការ (រៀបចំឱ្យត្រូវជាមួយ /api/khqr/webhook របស់ Render)
+     * 🎯 មុខងារទទួល Webhook រួម (ទទួលទាំង KHQR របស់ធនាគារ និង Callback របស់ FlashTopUp ក្នុងលីងតែមួយ)
      */
     public function khqrWebhook(Request $request): JsonResponse
     {
@@ -175,9 +175,16 @@ class TopupController extends Controller
 
         try {
             // -----------------------------------------------------------------
-            // ករណីទី១៖ Webhook ផ្ញើមកពី Flash Topup (Callback ស្ថានភាពកម្មង់ពេជ្រ)
+            // ករណីទី១៖ ឆែករកមើលទិន្នន័យរបស់ Flash Topup មុនគេបង្អស់
+            // ទោះបីជាបាញ់មកចំលីង KHQR ក៏ដឹងថាជា Flash Topup ដែរ (ការពារកុំឱ្យលោត 404)
             // -----------------------------------------------------------------
-            if ($request->has('event') && $request->has('reference_id')) {
+            if ($request->has('event') || $request->has('reference_id') || $request->has('order_status')) {
+                
+                // ករណីជាសារតេស្តដំបូងរបស់ FlashTopUp (Ping/Test Webhook)
+                if ($request->input('event') === 'test' || !$request->has('reference_id')) {
+                    return response()->json(['success' => true, 'message' => 'FlashTopUp Webhook Connected Successfully!']);
+                }
+
                 $referenceId = $request->input('reference_id');
                 $orderStatus = $request->input('order_status');
 
@@ -207,7 +214,7 @@ class TopupController extends Controller
             }
 
             // -----------------------------------------------------------------
-            // ករណីទី២៖ Webhook ផ្ញើមកពីប្រព័ន្ធធនាគារ (បង់លុយរួច រួចរុញទៅ Flash Topup)
+            // ករណីទី២៖ ជារបស់ប្រព័ន្ធធនាគារ (KHQR Gateway) ពិតប្រាកដ
             // -----------------------------------------------------------------
             $validated = $request->validate([
                 'transaction_id' => ['required', 'string'],
@@ -232,7 +239,7 @@ class TopupController extends Controller
                     return response()->json(['success' => true, 'message' => 'Order already processed or processing']);
                 }
 
-                // កែសម្រួល៖ ប្តូរទៅជា 'processing' សិន (បានលុយហើយ កំពុងបាញ់ពេជ្រ)
+                // ប្តូរទៅជា 'processing' សិន (បានលុយហើយ កំពុងបាញ់ពេជ្រ)
                 $order->update([
                     'status'  => 'processing',
                     'paid_at' => now(),

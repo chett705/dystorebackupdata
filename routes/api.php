@@ -27,7 +27,7 @@ Route::post('/mlbb/check-id', [TopupController::class, 'checkUsername']);
 |--------------------------------------------------------------------------
 */
 Route::post('/khqr/webhook', [TopupController::class, 'khqrWebhook']);
-
+Route::post('/flashtopup/webhook', [TopupController::class, 'khqrWebhook']);
 /*
 |--------------------------------------------------------------------------
 | 🛡️ Protected Routes សម្រាប់ផ្ទាំង Admin Panel
