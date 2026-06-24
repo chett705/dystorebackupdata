@@ -169,24 +169,28 @@ class TopupController extends Controller
     /**
      * 🎯 មុខងារទទួល Webhook រួម (ទទួលទាំង KHQR របស់ធនាគារ និង Callback របស់ FlashTopUp ក្នុងលីងតែមួយ)
      */
-    public function khqrWebhook(Request $request): JsonResponse
+   public function khqrWebhook(Request $request): JsonResponse
     {
         Log::info('🎯 WEBHOOK HIT FROM BANK OR FLASH TOPUP:', $request->all());
 
         try {
             // -----------------------------------------------------------------
-            // ករណីទី១៖ ឆែករកមើលទិន្នន័យរបស់ Flash Topup មុនគេបង្អស់
-            // ទោះបីជាបាញ់មកចំលីង KHQR ក៏ដឹងថាជា Flash Topup ដែរ (ការពារកុំឱ្យលោត 404)
+            // ករណីទី១៖ ឆែករកមើលទិន្នន័យរបស់ Flash Topup មុនគេបង្អស់ (ដាច់ខាតមិនទាន់លោត Validate ឡើយ)
             // -----------------------------------------------------------------
             if ($request->has('event') || $request->has('reference_id') || $request->has('order_status')) {
                 
                 // ករណីជាសារតេស្តដំបូងរបស់ FlashTopUp (Ping/Test Webhook)
-                if ($request->input('event') === 'test' || !$request->has('reference_id')) {
+                if ($request->input('event') === 'test' || $request->input('event') === 'order.updated' && !$request->has('reference_id')) {
                     return response()->json(['success' => true, 'message' => 'FlashTopUp Webhook Connected Successfully!']);
                 }
 
                 $referenceId = $request->input('reference_id');
                 $orderStatus = $request->input('order_status');
+
+                // បើជាសារតេស្តដែលមាន reference_id គំរូ "REF-TEST-001" របស់ FlashTopUp
+                if ($referenceId === 'REF-TEST-001') {
+                    return response()->json(['success' => true, 'message' => 'FlashTopUp Test Reference Received!']);
+                }
 
                 $order = TopupOrder::where('order_no', $referenceId)->first();
                 if (!$order) {
@@ -214,8 +218,12 @@ class TopupController extends Controller
             }
 
             // -----------------------------------------------------------------
-            // ករណីទី២៖ ជារបស់ប្រព័ន្ធធនាគារ (KHQR Gateway) ពិតប្រាកដ
+            // ករណីទី២៖ បើគ្មាន Key របស់ FlashTopUp ទេ ទើបវាជារបស់ធនាគារ (KHQR Gateway)
             // -----------------------------------------------------------------
+            if (!$request->has('transaction_id') || !$request->has('status')) {
+                return response()->json(['message' => 'Invalid Webhook Payload Format'], 400);
+            }
+
             $validated = $request->validate([
                 'transaction_id' => ['required', 'string'],
                 'status'         => ['required', 'string'],
@@ -239,7 +247,6 @@ class TopupController extends Controller
                     return response()->json(['success' => true, 'message' => 'Order already processed or processing']);
                 }
 
-                // ប្តូរទៅជា 'processing' សិន (បានលុយហើយ កំពុងបាញ់ពេជ្រ)
                 $order->update([
                     'status'  => 'processing',
                     'paid_at' => now(),
