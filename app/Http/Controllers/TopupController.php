@@ -6,7 +6,7 @@ use App\Models\TopupGame;
 use App\Models\TopupOrder;
 use App\Models\TopupPackage;
 use App\Services\TopupService;
-use Illuminate\Http\JsonResponse; 
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
@@ -14,9 +14,7 @@ use Illuminate\Support\Facades\Http;
 
 class TopupController extends Controller
 {
-    public function __construct(private readonly TopupService $topupService)
-    {
-    }
+    public function __construct(private readonly TopupService $topupService) {}
 
     /**
      * បង្ហាញបញ្ជីហ្គេមទាំងអស់ដែលកំពុងបើកដំណើរការ
@@ -25,7 +23,7 @@ class TopupController extends Controller
     {
         $games = TopupGame::query()
             ->where('is_active', true)
-            ->with(['packages' => fn ($query) => $query->where('is_active', true)->orderBy('sort_order')])
+            ->with(['packages' => fn($query) => $query->where('is_active', true)->orderBy('sort_order')])
             ->orderBy('name')
             ->get();
 
@@ -38,7 +36,7 @@ class TopupController extends Controller
     public function showGame($idOrCode): JsonResponse
     {
         $game = TopupGame::query()->where('id', $idOrCode)->orWhere('code', $idOrCode)->firstOrFail();
-        $game->load(['packages' => fn ($query) => $query->where('is_active', true)->orderBy('sort_order')]);
+        $game->load(['packages' => fn($query) => $query->where('is_active', true)->orderBy('sort_order')]);
         return response()->json(['data' => $game]);
     }
 
@@ -60,9 +58,9 @@ class TopupController extends Controller
 
         try {
             $apiId     = trim(env('FLASH_TOPUP_API_ID', 'RSMNGJ90S66GU8IC'));
-            $secretKey = trim(env('FLASH_TOPUP_SECRET_KEY')); 
+            $secretKey = trim(env('FLASH_TOPUP_SECRET_KEY'));
 
-            $path = '/api/reseller/v2/check-id'; 
+            $path = '/api/reseller/v2/check-id';
             $method = 'POST';
 
             $bodyData = [
@@ -85,37 +83,36 @@ class TopupController extends Controller
                 'X-FT-Nonce'      => $nonce,
                 'X-FT-Signature'  => $signature,
             ])
-            ->withoutVerifying() 
-            ->withBody($rawJsonBody, 'application/json')
-            ->post('https://api.flashtopup.com' . $path);
+                ->withoutVerifying()
+                ->withBody($rawJsonBody, 'application/json')
+                ->post('https://api.flashtopup.com' . $path);
 
             if ($response->successful()) {
                 $apiData = $response->json();
-                
-                $playerName = $apiData['account_name'] 
-                              ?? $apiData['data']['account_name'] 
-                              ?? $apiData['player_name'] 
-                              ?? null;
+
+                $playerName = $apiData['account_name']
+                    ?? $apiData['data']['account_name']
+                    ?? $apiData['player_name']
+                    ?? null;
 
                 return response()->json([
                     'message' => 'Done',
                     'result' => [
                         'player_name' => $playerName,
-                        'username'    => $playerName, 
-                        'name'        => $playerName, 
-                        'raw_data'    => $apiData     
+                        'username'    => $playerName,
+                        'name'        => $playerName,
+                        'raw_data'    => $apiData
                     ]
                 ]);
             }
 
             $errorData = $response->json();
             $statusCode = $response->status();
-            
+
             return response()->json([
-                'message' => $errorData['message'] ?? $errorData['error']['message'] ?? 'API Rejected', 
+                'message' => $errorData['message'] ?? $errorData['error']['message'] ?? 'API Rejected',
                 'error'   => $errorData
             ], $statusCode >= 100 && $statusCode < 600 ? $statusCode : 400);
-
         } catch (\Throwable $e) {
             return response()->json(['message' => 'Error', 'error' => $e->getMessage()], 500);
         }
@@ -153,7 +150,7 @@ class TopupController extends Controller
             ]);
 
             [$checkoutUrl, $paymentData] = $this->topupService->buildKhqrCheckout($order);
-            
+
             $order->update([
                 'gateway_transaction_id' => $paymentData['transaction_id'] ?? $order->order_no,
                 'gateway_checkout_url'   => $checkoutUrl,
@@ -161,7 +158,6 @@ class TopupController extends Controller
             ]);
 
             return response()->json(['message' => 'QR Generated', 'order' => $order, 'checkout_url' => $checkoutUrl], 201);
-
         } catch (\Throwable $e) {
             return response()->json(['message' => 'Error', 'error' => $e->getMessage()], 500);
         }
@@ -197,6 +193,9 @@ class TopupController extends Controller
         Log::info('🎯 WEBHOOK HIT FROM BANK OR FLASH TOPUP:', $request->all());
 
         try {
+            // ==========================================
+            // 🔔 ផ្នែកទី ១៖ Webhook ត្រឡប់មកវិញពីខាងក្រុមហ៊ុន Flash TopUp
+            // ==========================================
             if ($request->has('event') || $request->has('reference_id') || $request->has('order_status')) {
                 $referenceId = $request->input('reference_id');
                 $orderStatus = $request->input('order_status');
@@ -215,7 +214,9 @@ class TopupController extends Controller
                 return response()->json(['message' => 'Status handled']);
             }
 
-            // ផ្នែក Bank Webhook -> ដំណើរការបាញ់ពេជ្រទៅ FlashTopUp អូតូ
+            // ==========================================
+            // 🏦 ផ្នែកទី ២៖ Webhook ធនាគារបង់លុយ (KHQR) -> ចាប់ផ្តើមដំណើរការបាញ់ពេជ្រទៅ Flash
+            // ==========================================
             if (!$request->has('transaction_id') || !$request->has('status')) {
                 return response()->json(['message' => 'Invalid Webhook'], 400);
             }
@@ -230,38 +231,45 @@ class TopupController extends Controller
             if (!$order) return response()->json(['message' => 'Order not found'], 404);
 
             if (in_array(strtolower($request->input('status')), ['success', 'paid', 'completed'])) {
-                
-                // បើសិនជា Order ត្រូវបានដោះស្រាយរួចរាល់ហើយ បោះទៅប្រាប់ React ភ្លាមកុំឱ្យទើសអេក្រង់ស្កែន QR
+
+                // បើសិនជា Order ធ្លាប់ដំណើរការរួចរាល់ហើយ មិនបាច់រត់កូដបាញ់ពេជ្រទៅ Flash ជាន់គ្នាឡើយ
                 if (in_array($order->status, ['processing', 'success'])) {
                     return response()->json(['success' => true, 'status' => 'success', 'message' => 'Already processed']);
                 }
 
-                // កែប្រែទៅជា processing ភ្លាមៗដើម្បីបញ្ជាក់ថាទទួលបានលុយពី khqr.cc រួចរាល់
+                // កែប្រែទៅជា processing ភ្លាមៗដើម្បីបញ្ជាក់ថាទទួលបានលុយពី KHQR រួចរាល់
                 $order->update(['status' => 'processing', 'paid_at' => now()]);
 
-                // 🚀 លំហូរបាញ់ការកុម្ម៉ង់ទិញទៅ FlashTopUp
+                // 🚀 រៀបចំលំហូរបាញ់ការកុម្ម៉ង់ទិញទៅ FlashTopUp
                 try {
                     $order->load(['game', 'package']);
-                    $serviceCode = $order->package->sku ?? $order->package->code; 
+
+                    // ចាប់យកលេខ SKU ពីប្រព័ន្ធដែល Admin បានបំពេញ (ដូចជាលេខ 38)
+                    $serviceCode = $order->package->sku ?? $order->package->code;
+
+                    // 🎯 ទាញយក api_game_id ថ្មី (លេខ 3, 5, 107) ពី Table topup_games របស់បង
+                    $productId = $order->game->api_game_id ?? $order->game->id;
 
                     $apiId       = trim(env('FLASH_TOPUP_API_ID', 'RSMNGJ90S66GU8IC'));
                     $flashSecret = trim(env('FLASH_TOPUP_SECRET_KEY'));
-                    $timestamp   = (string) time(); 
+                    $timestamp   = (string) time();
                     $nonce       = bin2hex(random_bytes(16));
-                    
-                    $path        = '/api/reseller/v2/order'; 
+
+                    $path        = '/api/reseller/v2/order';
                     $method      = 'POST';
 
                     $orderBody = [
+                        'product_id'   => (int)$productId,    // 🎯 ដំណោះស្រាយចំណុចទី ១៖ បន្ថែម Field សំខាន់នេះផ្ញើទៅឱ្យ Flash
                         'quantity'     => 1,
-                        'reference_id' => $order->order_no, 
+                        'reference_id' => $order->order_no,
                         'server_id'    => trim($order->zone_id),
-                        'service_code' => trim($serviceCode), 
+                        'service_code' => trim($serviceCode),
                         'user_id'      => trim($order->player_id),
                     ];
+
                     ksort($orderBody);
                     $orderJson = json_encode($orderBody, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-                    
+
                     $orderBodyHash = hash('sha256', $orderJson);
                     $orderCanonical = implode("\n", [$method, $path, $timestamp, $nonce, $orderBodyHash]);
                     $orderSignature = hash_hmac('sha256', $orderCanonical, $flashSecret);
@@ -273,34 +281,30 @@ class TopupController extends Controller
                         'X-FT-Nonce'      => $nonce,
                         'X-FT-Signature'  => $orderSignature,
                     ])
-                    ->withoutVerifying() 
-                    ->withBody($orderJson, 'application/json')
-                    ->post('https://api.flashtopup.com' . $path);
+                        ->withoutVerifying()
+                        ->withBody($orderJson, 'application/json')
+                        ->post('https://api.flashtopup.com' . $path);
 
                     if ($flashResponse->successful()) {
-                        // បើបាញ់ពេជ្រទៅ FlashTopUp អូតូជោគជ័យ កែស្ថានភាពជា success ភ្លាម
+                        // 👍 បើបាញ់ពេជ្រទៅ FlashTopUp អូតូជោគជ័យ កែស្ថានភាពជា success ភ្លាម
                         $order->update(['status' => 'success']);
-                        Log::info("🚀 Fulfillment Success Initiated: {$order->order_no}");
+                        Log::info("🚀 Fulfillment Success Initiated to FlashTopUp: {$order->order_no}");
                     } else {
-                        // ⚠️ បើជួបបញ្ហាខុសកូដកញ្ចប់ SKU វានឹងដូរទៅ manual_hold (តែយើងដូរ status ធំជា success សិនដើម្បីឱ្យម៉ូយឃើញផ្ទាំង Receipt)
-                        Log::error("❌ Fulfillment API Refused: {$order->order_no}", $flashResponse->json());
-                        $order->update(['status' => 'success']); 
-                        
-                        // លួចបង្កើតកំណត់ត្រាមួយផ្សេងទៀតក្នុង DB របស់បង ឬកែប្រែ Flag ផ្សេងដើម្បីដឹងថា Order នេះត្រូវបញ្ចូលដោយដៃ
-                        TopupOrder::where('id', $order->id)->update(['status' => 'success']); 
-                        Log::warning("⚠️ Order {$order->order_no} is marked as success for frontend but needs manual check in FlashTopUp due to SKU error.");
+                        // ⚠️ ដំណោះស្រាយចំណុចទី ២៖ បើ Flash បដិសេធ (ដូចជាខុស SKU ឬ អស់លុយ Wallet) ឱ្យលោតស្ថានភាព manual_hold ក្នុង DB
+                        Log::error("❌ Fulfillment API Refused by FlashTopUp: {$order->order_no}", $flashResponse->json());
+                        $order->update(['status' => 'manual_hold']);
                     }
-
                 } catch (\Throwable $ex) {
-                    Log::critical("🚨 Error calling Flash Topup API: " . $ex->getMessage());
-                    $order->update(['status' => 'success']); // ធានាថាអេក្រង់ម៉ូយនៅតែលោត Receipt
+                    Log::critical("🚨 Error calling Flash Topup API Exception: " . $ex->getMessage());
+                    $order->update(['status' => 'manual_hold']); // បើប្រព័ន្ធគាំង ឬដាច់អ៊ីនធឺណិត ឱ្យផ្អាកសម្រាប់បញ្ចូលដោយដៃ
                 }
 
                 return response()->json(['success' => true, 'status' => 'success', 'message' => 'Payment recorded']);
             }
-            
+
             return response()->json(['message' => 'Non-success status'], 400);
         } catch (\Throwable $e) {
+            Log::error("🚨 Critical Webhook Error: " . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
