@@ -14,12 +14,12 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         
-        // 🔐 រក្សាទុក Alias សម្រាប់ផ្ទាំង Admin ដដែល
+        // 🔐 រក្សាទុក Alias សម្រាប់ផ្ទាំង Admin ដដែល (កូដដើមរបស់បង)
         $middleware->alias([
             'admin.token' => \App\Http\Middleware\EnsureAdminApiToken::class,
         ]);
 
-        // 🎯 លើកលែងច្បាប់ CSRF សម្រាប់រាល់ API និង Webhook ទាំងអស់
+        // 🎯 ដំណោះស្រាយ៖ លើកលែងច្បាប់ CSRF សម្រាប់រាល់ API និង Webhook ទាំងអស់ (រួមទាំងចាស់ និងថ្មី)
         $middleware->validateCsrfTokens(except: [
             'api/*',
             'api/khqr-webhook',
@@ -27,19 +27,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/flashtopup/webhook',
         ]);
 
-        // 🌐 បើកសិទ្ធិ CORS ជាសកល ដើម្បីបំបាត់ CORS Error លើ Browser ទាំងស្រុង
-        $middleware->append(function ($request, $next) {
-            $response = $next($request);
-            
-            if (method_exists($response, 'header')) {
-                return $response
-                    ->header('Access-Control-Allow-Origin', '*')
-                    ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-                    ->header('Access-Control-Allow-Headers', 'Origin, Content-Type, Accept, Authorization, X-Requested-With, X-FT-API-ID, X-FT-Timestamp, X-FT-Nonce, X-FT-Signature');
-            }
-            
-            return $response;
-        });
+        // 🌐 ចុះឈ្មោះហៅប្រើប្រាស់ CorsMiddleware ដែលយើងទើបបង្កើតអម្បាញ់មិញ (បំបាត់ CORS Error)
+        $middleware->append(\App\Http\Middleware\CorsMiddleware::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
