@@ -8,6 +8,8 @@ use App\Models\TopupOrder;
 use App\Models\TopupPackage;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class DashboardController extends Controller
 {
@@ -23,7 +25,9 @@ class DashboardController extends Controller
             ->orderBy('name')
             ->get();
 
+        // 🎯 ដំណោះស្រាយបំបាត់សញ្ញាដក (Package: -)៖ ត្រូវថែម with(['game', 'package']) ដើម្បីបោះឈ្មោះទៅឱ្យ React
         $orders = TopupOrder::query()
+            ->with(['game', 'package'])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -41,14 +45,14 @@ class DashboardController extends Controller
     */
 
     /**
-     * ➕ បង្កើតហ្គេមថ្មី (អនុញ្ញាតឱ្យបញ្ចូល api_game_id ពី Admin ផ្ទាល់)
+     * ➕ បង្កើតហ្គេមថ្មី
      */
     public function storeGame(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'code'        => ['required', 'string', 'max:191', 'unique:topup_games,code'],
             'name'        => ['required', 'string', 'max:255'],
-            'api_game_id' => ['nullable', 'integer'], // 🎯 ព្រមទទួលយក Flash Game ID (e.g. 3, 5, 107)
+            'api_game_id' => ['nullable', 'integer'], 
             'is_active'   => ['nullable', 'boolean'],
         ]);
 
@@ -66,7 +70,7 @@ class DashboardController extends Controller
     }
 
     /**
-     * 📝 កែប្រែព័ត៌មានហ្គេម (អនុញ្ញាតឱ្យ Admin កែប្រែ api_game_id ពេលណាដូរលេខកូដក្រុមហ៊ុន)
+     * 📝 កែប្រែព័ត៌មានហ្គេម
      */
     public function updateGame(Request $request, $id): JsonResponse
     {
@@ -75,7 +79,7 @@ class DashboardController extends Controller
         $validated = $request->validate([
             'code'        => ['required', 'string', 'max:191', 'unique:topup_games,code,' . $game->id],
             'name'        => ['required', 'string', 'max:255'],
-            'api_game_id' => ['nullable', 'integer'], // 🎯 ព្រមទទួលការកែប្រែ Flash Game ID
+            'api_game_id' => ['nullable', 'integer'], 
             'is_active'   => ['nullable', 'boolean'],
         ]);
 
@@ -112,7 +116,7 @@ class DashboardController extends Controller
     */
 
     /**
-     * ➕ បង្កើតកញ្ចប់ពេជ្រថ្មី (ភ្ជាប់ទៅកាន់ topup_game_id ត្រឹមត្រូវតាម Schema)
+     * ➕ បង្កើតកញ្ចប់ពេជ្រថ្មី
      */
     public function storePackage(Request $request): JsonResponse
     {
@@ -121,7 +125,7 @@ class DashboardController extends Controller
             'name'           => ['nullable', 'string', 'max:255'],
             'price'          => ['required', 'numeric', 'min:0'],
             'diamond_amount' => ['required', 'integer', 'min:1'],
-            'sku'            => ['nullable', 'string', 'max:191'], // 🎯 ទទួលយកលេខ SKU របស់ Flash
+            'sku'            => ['nullable', 'string', 'max:191'], 
             'sort_order'     => ['nullable', 'integer', 'min:0'],
             'is_active'      => ['nullable', 'boolean'],
         ]);
@@ -129,7 +133,7 @@ class DashboardController extends Controller
         $packageName = $request->filled('name') ? trim($validated['name']) : $validated['diamond_amount'] . ' Diamonds';
 
         $package = TopupPackage::query()->create([
-            'topup_game_id'  => $validated['game_id'], // 🎯 ចងភ្ជាប់ទៅកាន់ ID ធំរបស់ Game ក្នុង DB
+            'topup_game_id'  => $validated['game_id'], 
             'name'           => $packageName,
             'price'          => $validated['price'],
             'diamond_amount' => $validated['diamond_amount'],
@@ -145,7 +149,7 @@ class DashboardController extends Controller
     }
 
     /**
-     * 📝 កែប្រែព័ត៌មានកញ្ចប់ពេជ្រ និងកែប្រែលេខ SKU របស់ Flash
+     * 📝 កែប្រែព័ត៌មានកញ្ចប់ពេជ្រ
      */
     public function updatePackage(Request $request, $id): JsonResponse
     {
@@ -156,7 +160,7 @@ class DashboardController extends Controller
             'name'           => ['nullable', 'string', 'max:255'],
             'price'          => ['nullable', 'numeric', 'min:0'],
             'diamond_amount' => ['nullable', 'integer', 'min:1'],
-            'sku'            => ['nullable', 'string', 'max:191'], // 🎯 អនុញ្ញាតឱ្យ Edit លេខ Flash SKU
+            'sku'            => ['nullable', 'string', 'max:191'], 
             'is_active'      => ['nullable', 'boolean'],
         ]);
 
@@ -189,7 +193,7 @@ class DashboardController extends Controller
         $order = TopupOrder::query()->findOrFail($id);
 
         $validated = $request->validate([
-            'status' => ['required', 'string', 'in:pending,success,failed'],
+            'status' => ['required', 'string', 'in:pending,success,failed,manual_hold'],
         ]);
 
         $order->update([
@@ -203,29 +207,93 @@ class DashboardController extends Controller
     }
 
     /**
-     * 🔍 បញ្ជាក់ និងពិនិត្យទិន្នន័យដោយដៃ (Manual Verification)
+     * ⚡ មុខងារចុចបង្ខំឱ្យជោគជ័យ និងបាញ់ពេជ្រទៅ FlashTopUp (Manual Verification)
      */
     public function manualVerifyOrder($id): JsonResponse
     {
         $order = TopupOrder::query()->findOrFail($id);
 
-        if ($order->status === 'success') {
+        if (in_array($order->status, ['success', 'completed'])) {
             return response()->json(['message' => 'Order is already marked as success.'], 400);
         }
 
-        $order->update([
-            'status'          => 'success',
-            'payment_status'  => 'paid',
-        ]);
+        // កែប្រែស្ថានភាពទៅជា processing ជាបណ្ដោះអាសន្ន
+        $order->update(['status' => 'processing', 'paid_at' => now()]);
 
-        return response()->json([
-            'message' => 'Order verified and processed manually.',
-            'data'    => $order
-        ]);
+        // 🚀 រៀបចំលំហូរបាញ់ការកុម្ម៉ង់ទិញទៅ FlashTopUp (ដូច Webhook ដែរ)
+        try {
+            $order->load(['game', 'package']);
+            
+            $serviceCode = $order->package ? ($order->package->sku ?? $order->package->code) : null; 
+            $productId   = $order->game ? ($order->game->api_game_id ?? $order->game->id) : null;
+
+            if (!$serviceCode || !$productId) {
+                $order->update(['status' => 'manual_hold']);
+                return response()->json(['message' => "Missing Data Mapping: Product ID ({$productId}) or Service Code ({$serviceCode}) is empty."], 422);
+            }
+
+            $apiId       = trim(env('FLASH_TOPUP_API_ID', 'RSMNGJ90S66GU8IC'));
+            $flashSecret = trim(env('FLASH_TOPUP_SECRET_KEY'));
+            $timestamp   = (string) time(); 
+            $nonce       = bin2hex(random_bytes(16));
+            $path        = '/api/reseller/v2/order'; 
+
+            $orderBody = [
+                'product_id'   => (int)$productId,    
+                'quantity'     => 1,
+                'reference_id' => $order->order_no, 
+                'server_id'    => trim($order->zone_id),
+                'service_code' => trim($serviceCode), 
+                'user_id'      => trim($order->player_id),
+            ];
+            
+            ksort($orderBody);
+            $orderJson = json_encode($orderBody, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            
+            $orderBodyHash = hash('sha256', $orderJson);
+            $orderCanonical = implode("\n", ['POST', $path, $timestamp, $nonce, $orderBodyHash]);
+            $orderSignature = hash_hmac('sha256', $orderCanonical, $flashSecret);
+
+            $flashResponse = Http::withHeaders([
+                'Content-Type'    => 'application/json',
+                'X-FT-API-ID'     => $apiId,
+                'X-FT-Timestamp'  => $timestamp,
+                'X-FT-Nonce'      => $nonce,
+                'X-FT-Signature'  => $orderSignature,
+            ])
+            ->withoutVerifying() 
+            ->withBody($orderJson, 'application/json')
+            ->post('https://api.flashtopup.com' . $path);
+
+            if ($flashResponse->successful()) {
+                // 👍 បើ Flash ព្រមព្រៀងកាត់លុយ និងបញ្ចូលពេជ្រជោគជ័យ
+                $order->update(['status' => 'success', 'success_at' => now()]);
+                Log::info("🚀 Manual Bypass Dispatched Success to FlashTopUp: {$order->order_no}");
+                
+                return response()->json([
+                    'message' => 'Order verified and processed via FlashTopUp successfully.',
+                    'order'   => $order->fresh(['game', 'package'])
+                ], 200);
+            } else {
+                // ❌ បើមានបញ្ហាខុសកូដ SKU ឬអស់លុយ Wallet ឱ្យធ្លាក់ទៅ manual_hold
+                Log::error("❌ Manual Bypass Refused by FlashTopUp: {$order->order_no}", $flashResponse->json());
+                $order->update(['status' => 'manual_hold']);
+                
+                return response()->json([
+                    'message' => 'FlashTopUp Refused Request: ' . ($flashResponse->json()['message'] ?? 'Unknown Error')
+                ], 400);
+            }
+
+        } catch (\Throwable $ex) {
+            Log::critical("🚨 Manual Bypass Exception: " . $ex->getMessage());
+            $order->update(['status' => 'manual_hold']);
+            
+            return response()->json(['message' => 'Internal server error: ' . $ex->getMessage()], 500);
+        }
     }
 
     /**
-     * ❌ លុបប្រវត្តិនៃការកុម្ម៉ង់ចោល (Destroy Order)
+     * ❌ លុបប្រវត្តិនៃការកុម្ម៉ង់ចោល
      */
     public function destroyOrder($id): JsonResponse
     {
