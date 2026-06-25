@@ -262,7 +262,7 @@ class TopupController extends Controller
                         $serviceCode = 'TOPUP_MOBILE_LEGENDS_3_55_DIAMONDS_38';
                         $productId = 3;
                     } elseif ($skuValue == '142') {
-                        $serviceCode = 'TOPUP_MOBILE_LEGENDS_WEEKLY_PASS_142'; // 🔥 កូដសម្រាប់ Weekly Pass
+                        $serviceCode = 'TOPUP_MOBILE_LEGENDS_3_WEEKLY_142'; // 🔥 កូដសម្រាប់ Weekly Pass
                         $productId = 3;
                     } else {
                         // ករណីកញ្ចប់ផ្សេងៗទៀតនាពេលអនាគតដែលបងបំពេញ SKU ពេញលេញស្រាប់
