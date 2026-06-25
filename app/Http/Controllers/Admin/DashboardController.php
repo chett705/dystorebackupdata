@@ -11,92 +11,117 @@ use Illuminate\Http\Request;
 
 class DashboardController extends Controller
 {
+    /**
+     * 📊 ទាញយកទិន្នន័យរួមសម្រាប់បង្ហាញនៅលើ Admin Dashboard (ទិន្នន័យ Catalog)
+     */
     public function index(): JsonResponse
     {
-        // 🎯 ១. គណនាចំណូលតែពី Orders ណាដែលជោគជ័យប៉ុណ្ណោះ
-        $revenue = TopupOrder::query()
-            ->where('status', 'success')
-            ->sum('amount');
+        $games = TopupGame::query()
+            ->with(['packages' => function ($query) {
+                $query->orderBy('sort_order');
+            }])
+            ->orderBy('name')
+            ->get();
+
+        $orders = TopupOrder::query()
+            ->orderBy('created_at', 'desc')
+            ->get();
 
         return response()->json([
-            'success' => true,
-            'stats' => [
-                'games' => TopupGame::count(),
-                'packages' => TopupPackage::count(),
-                'orders' => TopupOrder::where('status', 'success')->count(), // 🎯 រាប់តែពួកបង់លុយរួច
-                'revenue' => '$' . number_format($revenue, 2),
-                'orders_pending' => TopupOrder::query()->where('status', 'pending')->count(),
-                'orders_paid' => TopupOrder::query()->where('status', 'paid')->count(),
-                'orders_success' => TopupOrder::query()->where('status', 'success')->count(),
-            ],
-            'games' => TopupGame::query()
-                ->with(['packages' => fn ($query) => $query->orderBy('sort_order')])
-                ->orderBy('name')
-                ->get(),
-            'packages' => TopupPackage::query()
-                ->with('game')
-                ->orderBy('topup_game_id')
-                ->orderBy('sort_order')
-                ->get(),
-            
-            // 🎯 ២. ទាញយកបញ្ជី Orders បង្ហាញលើ Admin៖ បង្ខំយកតែពួកបង់លុយរួចរាល់ (Success) ប៉ុណ្ណោះ
-            // ពួក Pending (មិនទាន់បង់លុយ) គឺលែងបង្ហាញរំខានភ្នែកលើ Admin ទៀតហើយ
-            'orders' => TopupOrder::query()
-                ->with(['game', 'package'])
-                ->where('status', 'success') 
-                ->latest()
-                ->limit(100)
-                ->get(),
-        ], 200);
+            'games'    => $games,
+            'packages' => TopupPackage::query()->with('game')->orderBy('created_at', 'desc')->get(),
+            'orders'   => $orders,
+        ]);
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | 🎮 ផ្នែកគ្រប់គ្រងហ្គេម (Game Management)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * ➕ បង្កើតហ្គេមថ្មី (អនុញ្ញាតឱ្យបញ្ចូល api_game_id ពី Admin ផ្ទាល់)
+     */
     public function storeGame(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'code' => ['required', 'string', 'max:191', 'unique:topup_games,code'],
-            'name' => ['required', 'string', 'max:255'],
-            'is_active' => ['nullable', 'boolean'],
+            'code'        => ['required', 'string', 'max:191', 'unique:topup_games,code'],
+            'name'        => ['required', 'string', 'max:255'],
+            'api_game_id' => ['nullable', 'integer'], // 🎯 ព្រមទទួលយក Flash Game ID (e.g. 3, 5, 107)
+            'is_active'   => ['nullable', 'boolean'],
         ]);
 
         $game = TopupGame::query()->create([
-            'code' => strtolower(trim($validated['code'])),
-            'name' => trim($validated['name']),
-            'is_active' => $request->boolean('is_active', true),
+            'code'        => strtolower(trim($validated['code'])),
+            'name'        => trim($validated['name']),
+            'api_game_id' => $validated['api_game_id'] ?? null,
+            'is_active'   => $request->boolean('is_active', true),
         ]);
 
-        return response()->json(['message' => 'Game created successfully.', 'data' => $game], 201);
+        return response()->json([
+            'message' => 'Game created successfully.',
+            'data'    => $game
+        ], 201);
     }
 
+    /**
+     * 📝 កែប្រែព័ត៌មានហ្គេម (អនុញ្ញាតឱ្យ Admin កែប្រែ api_game_id ពេលណាដូរលេខកូដក្រុមហ៊ុន)
+     */
     public function updateGame(Request $request, $id): JsonResponse
     {
         $game = TopupGame::query()->findOrFail($id);
 
         $validated = $request->validate([
-            'code' => ['required', 'string', 'max:191', 'unique:topup_games,code,' . $game->id],
-            'name' => ['required', 'string', 'max:255'],
-            'is_active' => ['nullable', 'boolean'],
+            'code'        => ['required', 'string', 'max:191', 'unique:topup_games,code,' . $game->id],
+            'name'        => ['required', 'string', 'max:255'],
+            'api_game_id' => ['nullable', 'integer'], // 🎯 ព្រមទទួលការកែប្រែ Flash Game ID
+            'is_active'   => ['nullable', 'boolean'],
         ]);
 
         $game->update([
-            'code' => strtolower(trim($validated['code'])),
-            'name' => trim($validated['name']),
-            'is_active' => $request->has('is_active') ? $request->boolean('is_active') : $game->is_active,
+            'code'        => strtolower(trim($validated['code'])),
+            'name'        => trim($validated['name']),
+            'api_game_id' => $validated['api_game_id'] ?? $game->api_game_id,
+            'is_active'   => $request->has('is_active') ? $request->boolean('is_active') : $game->is_active,
         ]);
 
-        return response()->json(['message' => 'Game updated successfully.', 'data' => $game]);
+        return response()->json([
+            'message' => 'Game updated successfully.',
+            'data'    => $game
+        ]);
     }
 
     /**
-     * 🎯 កែសម្រួល៖ គាំទ្រការរក្សាទុក SKU ពេលបង្កើតកញ្ចប់ថ្មីពីផ្ទាំង Admin
+     * ❌ លុបហ្គេមចេញពីប្រព័ន្ធ
+     */
+    public function destroyGame($id): JsonResponse
+    {
+        $game = TopupGame::query()->findOrFail($id);
+        $game->delete();
+
+        return response()->json([
+            'message' => 'Game deleted successfully.'
+        ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | 💎 ផ្នែកគ្រប់គ្រងកញ្ចប់ពេជ្រ (Package Management)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * ➕ បង្កើតកញ្ចប់ពេជ្រថ្មី (ភ្ជាប់ទៅកាន់ topup_game_id ត្រឹមត្រូវតាម Schema)
      */
     public function storePackage(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'game_id'        => ['required', 'integer'], 
-            'name'           => ['nullable', 'string', 'max:255'], 
+            'game_id'        => ['required', 'integer'],
+            'name'           => ['nullable', 'string', 'max:255'],
             'price'          => ['required', 'numeric', 'min:0'],
-            'diamond_amount' => ['required', 'integer', 'min:1'], 
-            'sku'            => ['nullable', 'string', 'max:191'], // 🎯 បន្ថែមការអនុញ្ញាតឱ្យបញ្ជូន SKU មកពី Admin
+            'diamond_amount' => ['required', 'integer', 'min:1'],
+            'sku'            => ['nullable', 'string', 'max:191'], // 🎯 ទទួលយកលេខ SKU របស់ Flash
             'sort_order'     => ['nullable', 'integer', 'min:0'],
             'is_active'      => ['nullable', 'boolean'],
         ]);
@@ -104,114 +129,111 @@ class DashboardController extends Controller
         $packageName = $request->filled('name') ? trim($validated['name']) : $validated['diamond_amount'] . ' Diamonds';
 
         $package = TopupPackage::query()->create([
-            'game_id'        => $validated['game_id'], 
-            'topup_game_id'  => $validated['game_id'], 
+            'topup_game_id'  => $validated['game_id'], // 🎯 ចងភ្ជាប់ទៅកាន់ ID ធំរបស់ Game ក្នុង DB
             'name'           => $packageName,
             'price'          => $validated['price'],
-            'diamond_amount' => $validated['diamond_amount'], 
-            'sku'            => $validated['sku'] ? trim($validated['sku']) : null, // 🎯 រក្សាទុកទិន្នន័យ SKU
+            'diamond_amount' => $validated['diamond_amount'],
+            'sku'            => $validated['sku'] ? trim($validated['sku']) : null,
             'sort_order'     => $validated['sort_order'] ?? 0,
             'is_active'      => $request->boolean('is_active', true),
         ]);
 
-        return response()->json(['message' => 'Package created successfully.', 'package' => $package->fresh(['game'])], 201);
+        return response()->json([
+            'message' => 'Package created successfully.',
+            'package' => $package->fresh(['game'])
+        ], 201);
     }
 
     /**
-     * 🎯 កែសម្រួល៖ គាំទ្រការកែប្រែ (Update) លេខ SKU នៃកញ្ចប់ចាស់ៗពីផ្ទាំង Admin
+     * 📝 កែប្រែព័ត៌មានកញ្ចប់ពេជ្រ និងកែប្រែលេខ SKU របស់ Flash
      */
-    public function updatePackage(Request $request, TopupPackage $package): JsonResponse
+    public function updatePackage(Request $request, $id): JsonResponse
     {
+        $package = TopupPackage::query()->findOrFail($id);
+
         $validated = $request->validate([
+            'game_id'        => ['nullable', 'integer'],
             'name'           => ['nullable', 'string', 'max:255'],
-            'price'          => ['required', 'numeric', 'min:0'],
-            'diamond_amount' => ['required', 'integer', 'min:1'], 
-            'sku'            => ['nullable', 'string', 'max:191'], // 🎯 បន្ថែមការអនុញ្ញាតឱ្យកែប្រែ SKU
-            'sort_order'     => ['nullable', 'integer', 'min:0'],
+            'price'          => ['nullable', 'numeric', 'min:0'],
+            'diamond_amount' => ['nullable', 'integer', 'min:1'],
+            'sku'            => ['nullable', 'string', 'max:191'], // 🎯 អនុញ្ញាតឱ្យ Edit លេខ Flash SKU
             'is_active'      => ['nullable', 'boolean'],
         ]);
 
-        $packageName = $request->filled('name') ? trim($validated['name']) : $validated['diamond_amount'] . ' Diamonds';
-
         $package->update([
-            'name'           => $packageName,
-            'price'          => $validated['price'],
-            'diamond_amount' => $validated['diamond_amount'], 
-            'sku'            => $validated['sku'] ? trim($validated['sku']) : null, // 🎯 Update ទិន្នន័យ SKU ទៅ Aiven
-            'sort_order'     => $validated['sort_order'] ?? $package->sort_order,
-            'is_active'      => $request->boolean('is_active'),
+            'topup_game_id'  => $validated['game_id'] ?? $package->topup_game_id,
+            'name'           => $request->has('name') ? trim($validated['name']) : $package->name,
+            'price'          => $validated['price'] ?? $package->price,
+            'diamond_amount' => $validated['diamond_amount'] ?? $package->diamond_amount,
+            'sku'            => $request->has('sku') ? ($validated['sku'] ? trim($validated['sku']) : null) : $package->sku,
+            'is_active'      => $request->has('is_active') ? $request->boolean('is_active') : $package->is_active,
         ]);
-
-        return response()->json(['message' => 'Package updated successfully.', 'package' => $package->fresh(['game'])]);
-    }
-
-    public function updateOrder(Request $request, TopupOrder $order): JsonResponse
-    {
-        $validated = $request->validate([
-            'status'          => ['required', 'in:pending,paid,processing,success,failed'],
-            'player_username' => ['nullable', 'string', 'max:191'], 
-        ]);
-
-        $updateData = ['status' => $validated['status']];
-        if ($request->has('player_username') && !is_null($request->input('player_username'))) {
-            $updateData['player_username'] = trim($validated['player_username']);
-        }
-
-        $order->update($updateData);
-
-        return response()->json(['message' => 'Order updated successfully.', 'order' => $order->fresh(['game', 'package'])]);
-    }
-
-    public function manualVerifyOrder(Request $request, $id): JsonResponse
-    {
-        $order = TopupOrder::findOrFail($id);
-        
-        if (in_array($order->status, ['pending', 'failed'])) {
-            $order->status = 'success';
-            $order->paid_at = now();
-            $order->success_at = now();
-            $order->save();
-        }
 
         return response()->json([
-            'success' => true,
-            'message' => 'Order bypassed successfully.',
-            'order'   => $order->fresh(['game', 'package'])
-        ], 200);
+            'message' => 'Package updated successfully.',
+            'package' => $package->fresh(['game'])
+        ]);
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | 📦 ផ្នែកគ្រប់គ្រងការបញ្ជាទិញ (Order Management)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * 📝 កែប្រែស្ថានភាពទូទៅនៃ Order (Pending, Success, Failed)
+     */
+    public function updateOrder(Request $request, $id): JsonResponse
+    {
+        $order = TopupOrder::query()->findOrFail($id);
+
+        $validated = $request->validate([
+            'status' => ['required', 'string', 'in:pending,success,failed'],
+        ]);
+
+        $order->update([
+            'status' => $validated['status'],
+        ]);
+
+        return response()->json([
+            'message' => 'Order status updated successfully.',
+            'data'    => $order
+        ]);
+    }
+
+    /**
+     * 🔍 បញ្ជាក់ និងពិនិត្យទិន្នន័យដោយដៃ (Manual Verification)
+     */
+    public function manualVerifyOrder($id): JsonResponse
+    {
+        $order = TopupOrder::query()->findOrFail($id);
+
+        if ($order->status === 'success') {
+            return response()->json(['message' => 'Order is already marked as success.'], 400);
+        }
+
+        $order->update([
+            'status'          => 'success',
+            'payment_status'  => 'paid',
+        ]);
+
+        return response()->json([
+            'message' => 'Order verified and processed manually.',
+            'data'    => $order
+        ]);
+    }
+
+    /**
+     * ❌ លុបប្រវត្តិនៃការកុម្ម៉ង់ចោល (Destroy Order)
+     */
     public function destroyOrder($id): JsonResponse
     {
-        $order = TopupOrder::findOrFail($id);
+        $order = TopupOrder::query()->findOrFail($id);
         $order->delete();
 
-        return response()->json(['success' => true, 'message' => 'Order deleted successfully.'], 200);
-    }
-
-    public function destroyGame($id): JsonResponse
-    {
-        try {
-            $game = TopupGame::query()->find($id);
-
-            if (!$game) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Game not found.'
-                ], 404);
-            }
-
-            $game->delete();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Game deleted successfully.'
-            ], 200);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to delete game: ' . $e->getMessage()
-            ], 500);
-        }
+        return response()->json([
+            'message' => 'Order record deleted successfully.'
+        ]);
     }
 }
