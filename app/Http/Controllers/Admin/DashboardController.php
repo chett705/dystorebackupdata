@@ -13,9 +13,6 @@ use Illuminate\Support\Facades\Log;
 
 class DashboardController extends Controller
 {
-    /**
-     * 📊 ទាញយកទិន្នន័យរួមសម្រាប់បង្ហាញនៅលើ Admin Dashboard (ទិន្នន័យ Catalog)
-     */
     public function index(): JsonResponse
     {
         $games = TopupGame::query()
@@ -25,9 +22,8 @@ class DashboardController extends Controller
             ->orderBy('name')
             ->get();
 
-        // 🎯 ដំណោះស្រាយបំបាត់សញ្ញាដក (Package: -)៖ ត្រូវថែម with(['game', 'package']) ដើម្បីបោះឈ្មោះទៅឱ្យ React
         $orders = TopupOrder::query()
-            ->with(['game', 'package'])
+            ->with(['game', 'package']) // 🎯 Eager load ឈ្មោះកញ្ចប់ពេជ្រកុំឱ្យចេញសញ្ញាដកលើ React
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -217,10 +213,8 @@ class DashboardController extends Controller
             return response()->json(['message' => 'Order is already marked as success.'], 400);
         }
 
-        // កែប្រែស្ថានភាពទៅជា processing ជាបណ្ដោះអាសន្ន
         $order->update(['status' => 'processing', 'paid_at' => now()]);
 
-        // 🚀 រៀបចំលំហូរបាញ់ការកុម្ម៉ង់ទិញទៅ FlashTopUp
         try {
             $order->load(['game', 'package']);
 
@@ -240,13 +234,14 @@ class DashboardController extends Controller
             $nonce       = bin2hex(random_bytes(16));
             $path        = '/api/reseller/v2/order';
 
+            // 🎯 បង្ខំ Casting (string) ទិន្នន័យទាំងអស់ដើម្បីឱ្យប្រព័ន្ធ Flash ស្វែងរកលេខកូដ SKU ឃើញ
             $orderBody = [
                 'product_id'   => (int)$productId,
                 'quantity'     => 1,
-                'reference_id' => $order->order_no,
-                'server_id'    => trim($order->zone_id),
-                'service_code' => trim($serviceCode),
-                'user_id'      => trim($order->player_id),
+                'reference_id' => (string)$order->order_no,
+                'server_id'    => (string)trim($order->zone_id),
+                'service_code' => (string)trim($serviceCode),
+                'user_id'      => (string)trim($order->player_id),
             ];
 
             ksort($orderBody);
@@ -268,43 +263,27 @@ class DashboardController extends Controller
                 ->post('https://api.flashtopup.com' . $path);
 
             if ($flashResponse->successful()) {
-                // 👍 បើ Flash ព្រមព្រៀងកាត់លុយ និងបញ្ចូលពេជ្រជោគជ័យ
-                $order->update(['status' => 'success', 'success_at' => now()]);
-                Log::info("🚀 Manual Bypass Dispatched Success to FlashTopUp: {$order->order_no}");
-
+                // ព្រោះជាការចុចលក្ខណៈ Manual បងអាច Update ទៅជា success ឬរង់ចាំ Callback ពី Flash ដូចគ្នា
+                Log::info("🚀 Manual Bypass Pushed to FlashTopUp successfully: {$order->order_no}");
                 return response()->json([
-                    'message' => 'Order verified and processed via FlashTopUp successfully.',
+                    'message' => 'Manual order verification pushed to FlashTopUp successfully.',
                     'order'   => $order->fresh(['game', 'package'])
                 ], 200);
             } else {
-                // ❌ ដំណោះស្រាយ៖ បើ Flash បដិសេធ ចាប់យកសារ Error ពិតប្រាកដមកបង្ហាញ
-                Log::error("❌ Manual Bypass Refused by FlashTopUp: {$order->order_no}", [
-                    'body' => $flashResponse->body(),
-                    'json' => $flashResponse->json()
-                ]);
-
+                Log::error("❌ Manual Bypass Refused by FlashTopUp: {$order->order_no}", $flashResponse->json());
                 $order->update(['status' => 'manual_hold']);
 
-                // លំហូរទាញយកអក្សរ Error ឱ្យបានល្អបំផុតចេញពី API របស់គេ
-                $errorString = $flashResponse->body() ?: 'No response body';
+                $errorString = $flashResponse->body() ?: 'Unknown Error';
                 $responseData = $flashResponse->json();
-
-                if ($responseData) {
-                    if (isset($responseData['message'])) {
-                        $errorString = $responseData['message'];
-                    } elseif (isset($responseData['error'])) {
-                        $errorString = is_array($responseData['error']) ? json_encode($responseData['error']) : $responseData['error'];
-                    }
+                if ($responseData && isset($responseData['message'])) {
+                    $errorString = $responseData['message'];
                 }
 
-                return response()->json([
-                    'message' => 'FlashTopUp Refused: ' . $errorString
-                ], 400);
+                return response()->json(['message' => 'FlashTopUp Refused: ' . $errorString], 400);
             }
         } catch (\Throwable $ex) {
             Log::critical("🚨 Manual Bypass Exception: " . $ex->getMessage());
             $order->update(['status' => 'manual_hold']);
-
             return response()->json(['message' => 'Internal server error: ' . $ex->getMessage()], 500);
         }
     }
