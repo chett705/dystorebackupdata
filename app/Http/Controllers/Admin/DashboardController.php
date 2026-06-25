@@ -52,7 +52,7 @@ class DashboardController extends Controller
         $validated = $request->validate([
             'code'        => ['required', 'string', 'max:191', 'unique:topup_games,code'],
             'name'        => ['required', 'string', 'max:255'],
-            'api_game_id' => ['nullable', 'integer'], 
+            'api_game_id' => ['nullable', 'integer'],
             'is_active'   => ['nullable', 'boolean'],
         ]);
 
@@ -79,7 +79,7 @@ class DashboardController extends Controller
         $validated = $request->validate([
             'code'        => ['required', 'string', 'max:191', 'unique:topup_games,code,' . $game->id],
             'name'        => ['required', 'string', 'max:255'],
-            'api_game_id' => ['nullable', 'integer'], 
+            'api_game_id' => ['nullable', 'integer'],
             'is_active'   => ['nullable', 'boolean'],
         ]);
 
@@ -125,7 +125,7 @@ class DashboardController extends Controller
             'name'           => ['nullable', 'string', 'max:255'],
             'price'          => ['required', 'numeric', 'min:0'],
             'diamond_amount' => ['required', 'integer', 'min:1'],
-            'sku'            => ['nullable', 'string', 'max:191'], 
+            'sku'            => ['nullable', 'string', 'max:191'],
             'sort_order'     => ['nullable', 'integer', 'min:0'],
             'is_active'      => ['nullable', 'boolean'],
         ]);
@@ -133,7 +133,7 @@ class DashboardController extends Controller
         $packageName = $request->filled('name') ? trim($validated['name']) : $validated['diamond_amount'] . ' Diamonds';
 
         $package = TopupPackage::query()->create([
-            'topup_game_id'  => $validated['game_id'], 
+            'topup_game_id'  => $validated['game_id'],
             'name'           => $packageName,
             'price'          => $validated['price'],
             'diamond_amount' => $validated['diamond_amount'],
@@ -160,7 +160,7 @@ class DashboardController extends Controller
             'name'           => ['nullable', 'string', 'max:255'],
             'price'          => ['nullable', 'numeric', 'min:0'],
             'diamond_amount' => ['nullable', 'integer', 'min:1'],
-            'sku'            => ['nullable', 'string', 'max:191'], 
+            'sku'            => ['nullable', 'string', 'max:191'],
             'is_active'      => ['nullable', 'boolean'],
         ]);
 
@@ -220,36 +220,38 @@ class DashboardController extends Controller
         // កែប្រែស្ថានភាពទៅជា processing ជាបណ្ដោះអាសន្ន
         $order->update(['status' => 'processing', 'paid_at' => now()]);
 
-        // 🚀 រៀបចំលំហូរបាញ់ការកុម្ម៉ង់ទិញទៅ FlashTopUp (ដូច Webhook ដែរ)
+        // 🚀 រៀបចំលំហូរបាញ់ការកុម្ម៉ង់ទិញទៅ FlashTopUp
         try {
             $order->load(['game', 'package']);
-            
-            $serviceCode = $order->package ? ($order->package->sku ?? $order->package->code) : null; 
+
+            $serviceCode = $order->package ? ($order->package->sku ?? $order->package->code) : null;
             $productId   = $order->game ? ($order->game->api_game_id ?? $order->game->id) : null;
 
             if (!$serviceCode || !$productId) {
                 $order->update(['status' => 'manual_hold']);
-                return response()->json(['message' => "Missing Data Mapping: Product ID ({$productId}) or Service Code ({$serviceCode}) is empty."], 422);
+                return response()->json([
+                    'message' => "Missing Data Mapping: Product ID ({$productId}) or Service Code ({$serviceCode}) is empty."
+                ], 422);
             }
 
             $apiId       = trim(env('FLASH_TOPUP_API_ID', 'RSMNGJ90S66GU8IC'));
             $flashSecret = trim(env('FLASH_TOPUP_SECRET_KEY'));
-            $timestamp   = (string) time(); 
+            $timestamp   = (string) time();
             $nonce       = bin2hex(random_bytes(16));
-            $path        = '/api/reseller/v2/order'; 
+            $path        = '/api/reseller/v2/order';
 
             $orderBody = [
-                'product_id'   => (int)$productId,    
+                'product_id'   => (int)$productId,
                 'quantity'     => 1,
-                'reference_id' => $order->order_no, 
+                'reference_id' => $order->order_no,
                 'server_id'    => trim($order->zone_id),
-                'service_code' => trim($serviceCode), 
+                'service_code' => trim($serviceCode),
                 'user_id'      => trim($order->player_id),
             ];
-            
+
             ksort($orderBody);
             $orderJson = json_encode($orderBody, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-            
+
             $orderBodyHash = hash('sha256', $orderJson);
             $orderCanonical = implode("\n", ['POST', $path, $timestamp, $nonce, $orderBodyHash]);
             $orderSignature = hash_hmac('sha256', $orderCanonical, $flashSecret);
@@ -261,33 +263,48 @@ class DashboardController extends Controller
                 'X-FT-Nonce'      => $nonce,
                 'X-FT-Signature'  => $orderSignature,
             ])
-            ->withoutVerifying() 
-            ->withBody($orderJson, 'application/json')
-            ->post('https://api.flashtopup.com' . $path);
+                ->withoutVerifying()
+                ->withBody($orderJson, 'application/json')
+                ->post('https://api.flashtopup.com' . $path);
 
             if ($flashResponse->successful()) {
                 // 👍 បើ Flash ព្រមព្រៀងកាត់លុយ និងបញ្ចូលពេជ្រជោគជ័យ
                 $order->update(['status' => 'success', 'success_at' => now()]);
                 Log::info("🚀 Manual Bypass Dispatched Success to FlashTopUp: {$order->order_no}");
-                
+
                 return response()->json([
                     'message' => 'Order verified and processed via FlashTopUp successfully.',
                     'order'   => $order->fresh(['game', 'package'])
                 ], 200);
             } else {
-                // ❌ បើមានបញ្ហាខុសកូដ SKU ឬអស់លុយ Wallet ឱ្យធ្លាក់ទៅ manual_hold
-                Log::error("❌ Manual Bypass Refused by FlashTopUp: {$order->order_no}", $flashResponse->json());
+                // ❌ ដំណោះស្រាយ៖ បើ Flash បដិសេធ ចាប់យកសារ Error ពិតប្រាកដមកបង្ហាញ
+                Log::error("❌ Manual Bypass Refused by FlashTopUp: {$order->order_no}", [
+                    'body' => $flashResponse->body(),
+                    'json' => $flashResponse->json()
+                ]);
+
                 $order->update(['status' => 'manual_hold']);
-                
+
+                // លំហូរទាញយកអក្សរ Error ឱ្យបានល្អបំផុតចេញពី API របស់គេ
+                $errorString = $flashResponse->body() ?: 'No response body';
+                $responseData = $flashResponse->json();
+
+                if ($responseData) {
+                    if (isset($responseData['message'])) {
+                        $errorString = $responseData['message'];
+                    } elseif (isset($responseData['error'])) {
+                        $errorString = is_array($responseData['error']) ? json_encode($responseData['error']) : $responseData['error'];
+                    }
+                }
+
                 return response()->json([
-                    'message' => 'FlashTopUp Refused Request: ' . ($flashResponse->json()['message'] ?? 'Unknown Error')
+                    'message' => 'FlashTopUp Refused: ' . $errorString
                 ], 400);
             }
-
         } catch (\Throwable $ex) {
             Log::critical("🚨 Manual Bypass Exception: " . $ex->getMessage());
             $order->update(['status' => 'manual_hold']);
-            
+
             return response()->json(['message' => 'Internal server error: ' . $ex->getMessage()], 500);
         }
     }
