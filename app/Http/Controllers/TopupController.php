@@ -188,7 +188,7 @@ class TopupController extends Controller
     /**
      * 🎯 មុខងារទទួល Webhook រួម (KHQR Payment ➡️ ដំណើរការបាញ់ពេជ្រអូតូ)
      */
-    public function khqrWebhook(Request $request): JsonResponse
+   public function khqrWebhook(Request $request): JsonResponse
 {
     Log::info('🎯 WEBHOOK HIT FROM BANK OR FLASH TOPUP:', $request->all());
 
@@ -202,14 +202,14 @@ class TopupController extends Controller
 
             $order = TopupOrder::where('order_no', $referenceId)->first();
             
-            // 🎯 ដំណោះស្រាយពិសេស៖ បើរក Order មិនឃើញ ឆែកមើលថាតើជាការចុចតេស្ត (Test Webhook) របស់ Flash ដែរឬទេ?
+            // 🎯 ដំណោះស្រាយ៖ បើរក Order មិនឃើញ ឆែកមើលថាតើជាការចុចតេស្ត (Test Webhook) របស់ Flash ដែរឬទេ?
             if (!$order) {
                 if (str_contains(strtolower($referenceId), 'test') || $referenceId === 'REF-TEST-001') {
                     Log::info("🎉 FlashTopUp Test Webhook Received and Handled successfully!");
                     return response()->json([
                         'success' => true, 
                         'message' => 'Test Webhook Received Successfully'
-                    ], 200); // 💡 បោះ ២០០ OK ទៅប្រាប់ប្រព័ន្ធគេភ្លាមៗដើម្បីឱ្យឡើងពណ៌បៃតង
+                    ], 200); // បោះ ២០០ OK ទៅប្រាប់ប្រព័ន្ធគេភ្លាមៗដើម្បីឱ្យឡើងពណ៌បៃតង
                 }
                 
                 return response()->json(['message' => 'Order not found'], 404);
@@ -255,13 +255,21 @@ class TopupController extends Controller
 
             // 🚀 រៀបចំលំហូរបាញ់ការកុម្ម៉ង់ទិញទៅ FlashTopUp
             try {
+                // 🎯 ហៅទាញទិន្នន័យពី Relationship game() និង package() របស់ Model
                 $order->load(['game', 'package']);
                 
-                // ចាប់យកលេខ SKU ពីប្រព័ន្ធដែល Admin បានបំពេញ (ដូចជាលេខ 38)
-                $serviceCode = $order->package->sku ?? $order->package->code; 
+                // 🎯 ចាប់យកលេខ SKU ឱ្យត្រូវតាម Object Model ដែលបងបានចង
+                $serviceCode = $order->package ? ($order->package->sku ?? $order->package->code) : null; 
                 
-                // ទាញយក api_game_id ថ្មី (លេខ 3, 5, 107) ពី Table topup_games របស់បង
-                $productId = $order->game->api_game_id ?? $order->game->id;
+                // 🎯 ចាប់យក api_game_id ឱ្យត្រូវតាម Object Model ដែលបងបានចង
+                $productId = $order->game ? ($order->game->api_game_id ?? $order->game->id) : null;
+
+                // បើខុសទិន្នន័យកញ្ចប់ផលិតផល មិនបាច់បាញ់ទៅ Flash នាំគាំងទេ ឱ្យធ្លាក់ទៅ manual_hold ហ្មង
+                if (!$serviceCode || !$productId) {
+                    Log::error("❌ Missing Data for FlashTopUp Order #{$order->order_no}: Product ID: {$productId}, Service Code: {$serviceCode}");
+                    $order->update(['status' => 'manual_hold']);
+                    return response()->json(['success' => false, 'message' => 'Missing package or game data mapping']);
+                }
 
                 $apiId       = trim(env('FLASH_TOPUP_API_ID', 'RSMNGJ90S66GU8IC'));
                 $flashSecret = trim(env('FLASH_TOPUP_SECRET_KEY'));
@@ -272,7 +280,7 @@ class TopupController extends Controller
                 $method      = 'POST';
 
                 $orderBody = [
-                    'product_id'   => (int)$productId,    // 🎯 បានបន្ថែម Field សំខាន់ product_id
+                    'product_id'   => (int)$productId,    
                     'quantity'     => 1,
                     'reference_id' => $order->order_no, 
                     'server_id'    => trim($order->zone_id),
@@ -303,7 +311,7 @@ class TopupController extends Controller
                     $order->update(['status' => 'success']);
                     Log::info("🚀 Fulfillment Success Initiated to FlashTopUp: {$order->order_no}");
                 } else {
-                    // ⚠️ បើ Flash បដិសេធ (ដូចជាខុស SKU ឬ អស់លុយ Wallet) ឱ្យលោតស្ថានភាព manual_hold ក្នុង DB
+                    // ⚠️ បើ Flash បដិសេធ (ដូចជាអស់លុយ Wallet) ឱ្យលោតស្ថានភាព manual_hold ក្នុង DB
                     Log::error("❌ Fulfillment API Refused by FlashTopUp: {$order->order_no}", $flashResponse->json());
                     $order->update(['status' => 'manual_hold']); 
                 }
