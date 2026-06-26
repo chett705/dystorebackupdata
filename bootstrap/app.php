@@ -27,7 +27,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/flashtopup/webhook',
         ]);
 
-        // 🌐 វិធីបើក CORS Header របៀបផ្លូវការរបស់ Laravel 11 (មិននាំឱ្យគាំង 502)
+        // 🌐 បើកច្បាប់ CORS របៀបផ្លូវការរបស់ Laravel 11 ទៅកាន់ API ទាញទិន្នន័យ (មានសុវត្ថិភាពខ្ពស់ មិននាំឱ្យគាំង 502)
         $middleware->statefulApi();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
