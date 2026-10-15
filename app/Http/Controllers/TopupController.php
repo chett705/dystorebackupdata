@@ -50,6 +50,20 @@ class TopupController extends Controller
      */
     public function checkUsername(Request $request): JsonResponse
     {
+        Log::info('🎯 Check Username hit:', [
+            'method' => $request->method(),
+            'url'    => $request->fullUrl(),
+            'data'   => $request->all(),
+        ]);
+
+        if ($request->isMethod('OPTIONS')) {
+            return response()->json(['status' => 'OK'], 200, [
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers' => '*',
+            ]);
+        }
+
         $gameCode = $request->input('game_code') 
             ?? $request->input('validation_code')
             ?? $request->input('game')
@@ -58,10 +72,14 @@ class TopupController extends Controller
 
         $playerId = $request->input('player_id') 
             ?? $request->input('user_id') 
+            ?? $request->input('userId') 
+            ?? $request->input('playerId') 
             ?? $request->input('id');
 
         $zoneId   = $request->input('zone_id') 
             ?? $request->input('server_id') 
+            ?? $request->input('serverId') 
+            ?? $request->input('zoneId') 
             ?? $request->input('zone') 
             ?? $request->input('server') 
             ?? '';

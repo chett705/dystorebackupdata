@@ -12,19 +12,37 @@ use Illuminate\Support\Facades\Route;
 |--------------------------------------------------------------------------
 */
 // 🎯 Route Aliases សម្រាប់ Check ID / Username គ្រប់ទម្រង់ Frontend
-Route::match(['GET', 'POST'], '/check-username', [TopupController::class, 'checkUsername']);
-Route::match(['GET', 'POST'], '/check-id', [TopupController::class, 'checkUsername']);
-Route::match(['GET', 'POST'], '/mlbb/check-id', [TopupController::class, 'checkUsername']);
+Route::match(['GET', 'POST', 'OPTIONS'], '/check-username', [TopupController::class, 'checkUsername']);
+Route::match(['GET', 'POST', 'OPTIONS'], '/check-id', [TopupController::class, 'checkUsername']);
+Route::match(['GET', 'POST', 'OPTIONS'], '/mlbb/check-id', [TopupController::class, 'checkUsername']);
 Route::get('/games', [TopupController::class, 'catalog']);
 
 Route::prefix('topup')->group(function () {
     Route::get('/games', [TopupController::class, 'catalog']);
     Route::get('/games/{game}', [TopupController::class, 'showGame']);
-    Route::match(['GET', 'POST'], '/check-username', [TopupController::class, 'checkUsername']);
-    Route::match(['GET', 'POST'], '/check-id', [TopupController::class, 'checkUsername']);
-    Route::match(['GET', 'POST'], '/mlbb/check-id', [TopupController::class, 'checkUsername']);
+    Route::match(['GET', 'POST', 'OPTIONS'], '/check-username', [TopupController::class, 'checkUsername']);
+    Route::match(['GET', 'POST', 'OPTIONS'], '/check-id', [TopupController::class, 'checkUsername']);
+    Route::match(['GET', 'POST', 'OPTIONS'], '/mlbb/check-id', [TopupController::class, 'checkUsername']);
     Route::post('/orders', [TopupController::class, 'createOrder']);
     Route::get('/orders/{order}', [TopupController::class, 'showOrder']);
+});
+
+// 🎯 ខ្សែការពារ Fallback ក្នុងករណី Frontend ហៅជាន់ Prefix /api/api/...
+Route::prefix('api')->group(function () {
+    Route::match(['GET', 'POST', 'OPTIONS'], '/check-username', [TopupController::class, 'checkUsername']);
+    Route::match(['GET', 'POST', 'OPTIONS'], '/check-id', [TopupController::class, 'checkUsername']);
+    Route::match(['GET', 'POST', 'OPTIONS'], '/mlbb/check-id', [TopupController::class, 'checkUsername']);
+    Route::get('/games', [TopupController::class, 'catalog']);
+
+    Route::prefix('topup')->group(function () {
+        Route::get('/games', [TopupController::class, 'catalog']);
+        Route::get('/games/{game}', [TopupController::class, 'showGame']);
+        Route::match(['GET', 'POST', 'OPTIONS'], '/check-username', [TopupController::class, 'checkUsername']);
+        Route::match(['GET', 'POST', 'OPTIONS'], '/check-id', [TopupController::class, 'checkUsername']);
+        Route::match(['GET', 'POST', 'OPTIONS'], '/mlbb/check-id', [TopupController::class, 'checkUsername']);
+        Route::post('/orders', [TopupController::class, 'createOrder']);
+        Route::get('/orders/{order}', [TopupController::class, 'showOrder']);
+    });
 });
 
 /*
