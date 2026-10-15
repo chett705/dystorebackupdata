@@ -26,10 +26,12 @@ Route::prefix('topup')->group(function () {
 |--------------------------------------------------------------------------
 */
 // 🎯 ជម្រើសទី ១៖ សម្រាប់ករណីប្រព័ន្ធហៅចូលចំផ្លូវធម្មតា
+Route::post('/payway/webhook', [TopupController::class, 'khqrWebhook']);
 Route::post('/khqr/webhook', [TopupController::class, 'khqrWebhook']);
 Route::post('/flashtopup/webhook', [TopupController::class, 'khqrWebhook']);
 
 // 🎯 ជម្រើសទី ២៖ បង្កើតថែមខ្សែការពារក្រែងលោវាស្វែងរកផ្លូវ /api មិនឃើញ (Fallback Security)
+Route::post('/api/payway/webhook', [TopupController::class, 'khqrWebhook']);
 Route::post('/api/khqr/webhook', [TopupController::class, 'khqrWebhook']);
 Route::post('/api/flashtopup/webhook', [TopupController::class, 'khqrWebhook']);
 

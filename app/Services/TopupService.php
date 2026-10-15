@@ -81,13 +81,63 @@ class TopupService
     }
 
     /**
+     * 🛒 មុខងារបង្កើតលីងទូទាត់ PayWay (ABA PayWay Payment Link)
+     */
+    public function buildPaywayCheckout(TopupOrder $order): array
+    {
+        $checkoutUrl = config('services.payway.checkout_url')
+            ?: env('PAYWAY_CHECKOUT_URL')
+            ?: 'https://link.payway.com.kh/ABAPAY9s540501U';
+
+        $orderNo = $order->order_no ?? ('TEMP_' . time() . '_' . Str::upper(Str::random(5)));
+        $transactionId = $order->gateway_transaction_id ?: ('ORD_' . $orderNo . '_' . date('YmdHis'));
+
+        $amount = number_format((float) ($order->amount ?? 0), 2, '.', '');
+
+        $playerId = $order->player_id ?? '0';
+        $zoneId = $order->zone_id ?? '';
+
+        $order->loadMissing('game');
+        $gameCode = strtoupper($order->game?->code ?? 'GAME');
+
+        if (!blank($zoneId)) {
+            $remark = sprintf('%s|ID:%s|S:%s', $gameCode, $playerId, $zoneId);
+        } else {
+            $remark = sprintf('%s|ID:%s', $gameCode, $playerId);
+        }
+
+        $paymentData = [
+            'transaction_id' => $transactionId,
+            'amount' => $amount,
+            'remark' => substr($remark, 0, 50),
+            'hash' => sha1($transactionId . $amount . $remark),
+        ];
+
+        return [$checkoutUrl, $paymentData];
+    }
+
+    /**
+     * 🛒 មុខងារបង្កើតលីងទូទាត់ទូទៅ (Dynamic Router ទៅកាន់ PayWay ឬ KHQR)
+     */
+    public function buildCheckout(TopupOrder $order): array
+    {
+        $method = strtolower($order->payment_method ?? config('services.payment_method', 'payway'));
+
+        if (in_array($method, ['khqr', 'khqrcc'])) {
+            return $this->buildKhqrCheckout($order);
+        }
+
+        return $this->buildPaywayCheckout($order);
+    }
+
+    /**
      * 🛒 មុខងារបង្កើតលីងទូទាត់ KHQR (Dynamic System Support)
      */
     public function buildKhqrCheckout(TopupOrder $order): array
     {
-        $gatewayUrl = 'https://khqr.cc/api/payment/request';
-        $profileId = 'tW6PHjgPyzISFi3KK22hKZ57rag1cWHS';
-        $secretKey = 'zsFq7SWHV4gYFSAdfg2ud8WV747tBOei';
+        $gatewayUrl = config('services.khqr.gateway_url') ?: 'https://khqr.cc/api/payment/request';
+        $profileId = config('services.khqr.profile_id') ?: 'tW6PHjgPyzISFi3KK22hKZ57rag1cWHS';
+        $secretKey = config('services.khqr.secret_key') ?: 'zsFq7SWHV4gYFSAdfg2ud8WV747tBOei';
 
         $orderNo = $order->order_no ?? ('TEMP_' . time() . '_' . Str::upper(Str::random(5)));
         $transactionId = $order->gateway_transaction_id ?: ('ORD_' . $orderNo . '_' . date('YmdHis'));

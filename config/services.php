@@ -31,7 +31,13 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
-    // 🚀 កូដពេញលេញសម្រាប់គម្រោង DyzzStore (KHQR, Game Lookup, Supplier, Telegram)
+    // 🚀 កូដពេញលេញសម្រាប់គម្រោង DyzzStore (PayWay, KHQR, Game Lookup, Supplier, Telegram)
+    'payment_method' => env('PAYMENT_METHOD', 'payway'),
+
+    'payway' => [
+        'checkout_url' => env('PAYWAY_CHECKOUT_URL', 'https://link.payway.com.kh/ABAPAY9s540501U'),
+    ],
+
     'khqr' => [
         'gateway_url' => env('KHQR_GATEWAY_URL'),
         'profile_id' => env('KHQR_PROFILE_ID'),

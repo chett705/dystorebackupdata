@@ -19,7 +19,7 @@ return new class extends Migration
             $table->foreignId('topup_package_id')->constrained('topup_packages')->restrictOnDelete();
             $table->string('player_id');
             $table->string('zone_id');
-            $table->string('payment_method')->default('khqr');
+            $table->string('payment_method')->default('payway');
             $table->decimal('amount', 12, 2);
             $table->unsignedInteger('diamond_amount');
             $table->string('status')->default('pending');

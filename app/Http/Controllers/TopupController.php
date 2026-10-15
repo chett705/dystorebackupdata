@@ -124,7 +124,7 @@ class TopupController extends Controller
     }
 
     /**
-     * បង្កើត Order ថ្មីក្នុងប្រព័ន្ធ និងទាញយក KHQR
+     * បង្កើត Order ថ្មីក្នុងប្រព័ន្ធ និងទាញយក PayWay / KHQR Checkout URL
      */
     public function createOrder(Request $request): JsonResponse
     {
@@ -135,8 +135,13 @@ class TopupController extends Controller
                 'player_id'       => ['required', 'string'],
                 'player_username' => ['nullable', 'string'],
                 'zone_id'         => ['nullable', 'string'],
-                'payment_method'  => ['required'],
+                'payment_method'  => ['nullable', 'string'],
             ]);
+
+            $paymentMethod = $validated['payment_method'] ?? config('services.payment_method', 'payway');
+            if (in_array(strtolower($paymentMethod), ['khqrcc', 'khqr', 'payway'])) {
+                $paymentMethod = 'payway';
+            }
 
             $game = TopupGame::where('code', strtolower($validated['game_code']))->firstOrFail();
             $package = TopupPackage::findOrFail($validated['package_id']);
@@ -148,15 +153,15 @@ class TopupController extends Controller
                 'player_id'        => $validated['player_id'],
                 'player_username'  => $validated['player_username'] ?? '',
                 'zone_id'          => $validated['zone_id'] ?? '',
-                'payment_method'   => $validated['payment_method'],
+                'payment_method'   => $paymentMethod,
                 'amount'           => $package->price,
                 'diamond_amount'   => $package->diamond_amount,
                 'status'           => 'pending',
             ]);
 
-            // ⚡ ដំណោះស្រាយ៖ ហៅ TopupService តាមរយៈ app() helper ផ្ទាល់ ដើម្បីកុំឱ្យគាំង Server Error 500
+            // ⚡ ហៅ TopupService តាមរយៈ app() helper ផ្ទាល់ ដើម្បីបង្កើត Checkout URL (PayWay / KHQR)
             $topupService = app(TopupService::class);
-            [$checkoutUrl, $paymentData] = $topupService->buildKhqrCheckout($order);
+            [$checkoutUrl, $paymentData] = $topupService->buildCheckout($order);
 
             $order->update([
                 'gateway_transaction_id' => $paymentData['transaction_id'] ?? $order->order_no,
@@ -164,7 +169,7 @@ class TopupController extends Controller
                 'gateway_hash'           => $paymentData['hash'] ?? null,
             ]);
 
-            return response()->json(['message' => 'QR Generated', 'order' => $order, 'checkout_url' => $checkoutUrl], 201);
+            return response()->json(['message' => 'PayWay Checkout Generated', 'order' => $order, 'checkout_url' => $checkoutUrl], 201);
             
         } catch (\Throwable $e) {
             Log::error("🚨 Create Order Function Error: " . $e->getMessage());
@@ -231,13 +236,19 @@ class TopupController extends Controller
             }
 
             // ==========================================
-            // 🏦 ផ្នែកទី ២៖ Webhook ធនាគារបង់លុយ (KHQR) -> បាញ់អូតូភ្លាមៗ
+            // 🏦 ផ្នែកទី ២៖ Webhook ធនាគារបង់លុយ (PayWay / KHQR) -> បាញ់អូតូភ្លាមៗ
             // ==========================================
-            if (!$request->has('transaction_id') || !$request->has('status')) {
+            $transactionId = $request->input('transaction_id')
+                ?? $request->input('tran_id')
+                ?? $request->input('merchant_ref_no');
+
+            $status = $request->input('status')
+                ?? $request->input('payment_status');
+
+            if (!$transactionId || $status === null) {
                 return response()->json(['message' => 'Invalid Webhook'], 400);
             }
 
-            $transactionId = $request->input('transaction_id');
             $cleanWebhookKey = trim(str_replace('#', '', $transactionId));
 
             $order = TopupOrder::where('gateway_transaction_id', $cleanWebhookKey)
@@ -246,7 +257,7 @@ class TopupController extends Controller
 
             if (!$order) return response()->json(['message' => 'Order not found'], 404);
 
-            if (in_array(strtolower($request->input('status')), ['success', 'paid', 'completed'])) {
+            if (in_array(strtolower((string)$status), ['0', '00', 'success', 'paid', 'completed'])) {
                 
                 if (in_array($order->status, ['processing', 'success'])) {
                     return response()->json(['success' => true, 'status' => 'success', 'message' => 'Already processed']);

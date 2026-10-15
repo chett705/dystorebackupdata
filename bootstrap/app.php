@@ -20,7 +20,11 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // 🎯 ដំណោះស្រាយ៖ លើកលែងច្បាប់ CSRF ផ្លូវលីង Webhook របស់ធនាគារ (បិទការឆែក Token ត្រង់ផ្លូវនេះ)
         $middleware->validateCsrfTokens(except: [
+            'api/payway/webhook',
+            'api/payway-webhook',
+            'payway/webhook',
             'api/khqr/webhook',
+            'api/khqr-webhook',
             'api/flashtopup/webhook',
         ]);
     })
