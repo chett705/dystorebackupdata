@@ -50,28 +50,48 @@ class TopupController extends Controller
      */
     public function checkUsername(Request $request): JsonResponse
     {
-        $gameCode = $request->input('game_code') ?? $request->input('validation_code');
-        $playerId = $request->input('player_id') ?? $request->input('user_id');
-        $zoneId   = $request->input('zone_id') ?? $request->input('server_id') ?? '';
+        $gameCode = $request->input('game_code') 
+            ?? $request->input('validation_code')
+            ?? $request->input('game')
+            ?? $request->input('code')
+            ?? 'mlbb';
+
+        $playerId = $request->input('player_id') 
+            ?? $request->input('user_id') 
+            ?? $request->input('id');
+
+        $zoneId   = $request->input('zone_id') 
+            ?? $request->input('server_id') 
+            ?? $request->input('zone') 
+            ?? $request->input('server') 
+            ?? '';
+
+        if (is_numeric($gameCode)) {
+            $game = TopupGame::find($gameCode);
+            if ($game && $game->code) {
+                $gameCode = $game->code;
+            }
+        }
 
         $timestamp = (string) ($request->header('X-FT-Timestamp') ?? $request->input('ft_timestamp') ?? time());
         $nonce     = $request->header('X-FT-Nonce') ?? $request->input('ft_nonce') ?? bin2hex(random_bytes(16));
 
-        if (!$gameCode || !$playerId) {
-            return response()->json(['message' => 'game_code and player_id are required.'], 422);
+        if (!$playerId) {
+            return response()->json(['message' => 'player_id is required.'], 422);
         }
 
         try {
-            $apiId     = trim(env('FLASH_TOPUP_API_ID', 'RSMNGJ90S66GU8IC'));
-            $secretKey = trim(env('FLASH_TOPUP_SECRET_KEY'));
+            $apiId     = trim(config('services.flash_topup.api_id') ?: env('FLASH_TOPUP_API_ID', 'RSMNGJ90S66GU8IC'));
+            $secretKey = trim(config('services.flash_topup.secret_key') ?: env('FLASH_TOPUP_SECRET_KEY', '1c5e38d93eadd3f18ff717f3d2d3a925e3549190ce373690c5e68917aa6e9497'));
 
             $path = '/api/reseller/v2/check-id';
             $method = 'POST';
 
+            $code = strtolower(trim($gameCode));
             $bodyData = [
-                'server_id'       => trim($zoneId),
-                'user_id'         => trim($playerId),
-                'validation_code' => strtolower(trim($gameCode)),
+                'server_id'       => trim((string)$zoneId),
+                'user_id'         => trim((string)$playerId),
+                'validation_code' => $code,
             ];
             ksort($bodyData);
 
@@ -89,8 +109,42 @@ class TopupController extends Controller
                 'X-FT-Signature'  => $signature,
             ])
                 ->withoutVerifying()
+                ->timeout(15)
                 ->withBody($rawJsonBody, 'application/json')
                 ->post('https://api.flashtopup.com' . $path);
+
+            // Fallback retry with mobile_legends if mlbb was used and didn't succeed
+            if (!$response->successful() && ($code === 'mlbb' || $code === 'mobile_legends')) {
+                $altCode = ($code === 'mlbb') ? 'mobile_legends' : 'mlbb';
+                $altBodyData = [
+                    'server_id'       => trim((string)$zoneId),
+                    'user_id'         => trim((string)$playerId),
+                    'validation_code' => $altCode,
+                ];
+                ksort($altBodyData);
+                $altRawJson = json_encode($altBodyData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                $altBodyHash = hash('sha256', $altRawJson);
+                $altTime = (string) time();
+                $altNonce = bin2hex(random_bytes(16));
+                $altCanonical = implode("\n", [$method, $path, $altTime, $altNonce, $altBodyHash]);
+                $altSignature = hash_hmac('sha256', $altCanonical, $secretKey);
+
+                $altResponse = Http::withHeaders([
+                    'Content-Type'    => 'application/json',
+                    'X-FT-API-ID'     => $apiId,
+                    'X-FT-Timestamp'  => $altTime,
+                    'X-FT-Nonce'      => $altNonce,
+                    'X-FT-Signature'  => $altSignature,
+                ])
+                    ->withoutVerifying()
+                    ->timeout(15)
+                    ->withBody($altRawJson, 'application/json')
+                    ->post('https://api.flashtopup.com' . $path);
+
+                if ($altResponse->successful()) {
+                    $response = $altResponse;
+                }
+            }
 
             if ($response->successful()) {
                 $apiData = $response->json();
@@ -98,28 +152,46 @@ class TopupController extends Controller
                 $playerName = $apiData['account_name']
                     ?? $apiData['data']['account_name']
                     ?? $apiData['player_name']
+                    ?? $apiData['username']
+                    ?? $apiData['data']['username']
+                    ?? $apiData['name']
                     ?? null;
 
                 return response()->json([
-                    'message' => 'Done',
-                    'result' => [
-                        'player_name' => $playerName,
-                        'username'    => $playerName,
-                        'name'        => $playerName,
-                        'raw_data'    => $apiData
+                    'success'      => true,
+                    'message'      => 'Done',
+                    'username'     => $playerName,
+                    'player_name'  => $playerName,
+                    'name'         => $playerName,
+                    'account_name' => $playerName,
+                    'data'         => [
+                        'username'     => $playerName,
+                        'player_name'  => $playerName,
+                        'name'         => $playerName,
+                        'account_name' => $playerName,
+                        'player_id'    => $playerId,
+                        'zone_id'      => $zoneId,
+                    ],
+                    'result'       => [
+                        'player_name'  => $playerName,
+                        'username'     => $playerName,
+                        'name'         => $playerName,
+                        'raw_data'     => $apiData
                     ]
-                ]);
+                ], 200);
             }
 
             $errorData = $response->json();
             $statusCode = $response->status();
 
             return response()->json([
-                'message' => $errorData['message'] ?? $errorData['error']['message'] ?? 'API Rejected',
+                'success' => false,
+                'message' => $errorData['message'] ?? $errorData['error']['message'] ?? 'Player not found or verification error',
                 'error'   => $errorData
             ], $statusCode >= 100 && $statusCode < 600 ? $statusCode : 400);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Error', 'error' => $e->getMessage()], 500);
+            Log::error("🚨 Check Username Error: " . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'Error checking ID', 'error' => $e->getMessage()], 500);
         }
     }
 

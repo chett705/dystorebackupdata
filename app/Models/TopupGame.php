@@ -13,6 +13,7 @@ class TopupGame extends Model
     protected $fillable = [
         'code',
         'name',
+        'api_game_id',
         'is_active',
     ];
 

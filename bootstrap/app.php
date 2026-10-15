@@ -18,8 +18,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin.token' => \App\Http\Middleware\EnsureAdminApiToken::class,
         ]);
 
-        // 🎯 ដំណោះស្រាយ៖ លើកលែងច្បាប់ CSRF ផ្លូវលីង Webhook របស់ធនាគារ (បិទការឆែក Token ត្រង់ផ្លូវនេះ)
+        // 🎯 ដំណោះស្រាយ៖ លើកលែងច្បាប់ CSRF សម្រាប់ API, Check ID, និង Webhook
         $middleware->validateCsrfTokens(except: [
+            'api/*',
+            'topup/*',
+            '*check-username*',
+            '*check-id*',
             'api/payway/webhook',
             'api/payway-webhook',
             'payway/webhook',
@@ -30,6 +34,6 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*'),
+            fn (Request $request) => $request->is('api/*') || $request->is('topup/*') || $request->is('*check*') || $request->expectsJson(),
         );
     })->create();

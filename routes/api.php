@@ -11,13 +11,20 @@ use Illuminate\Support\Facades\Route;
 | 🛒 Public Routes សម្រាប់អតិថិជន (Topup Shop Prefix: topup)
 |--------------------------------------------------------------------------
 */
+// 🎯 Route Aliases សម្រាប់ Check ID / Username គ្រប់ទម្រង់ Frontend
+Route::match(['GET', 'POST'], '/check-username', [TopupController::class, 'checkUsername']);
+Route::match(['GET', 'POST'], '/check-id', [TopupController::class, 'checkUsername']);
+Route::match(['GET', 'POST'], '/mlbb/check-id', [TopupController::class, 'checkUsername']);
+Route::get('/games', [TopupController::class, 'catalog']);
+
 Route::prefix('topup')->group(function () {
     Route::get('/games', [TopupController::class, 'catalog']);
     Route::get('/games/{game}', [TopupController::class, 'showGame']);
-    Route::post('/check-username', [TopupController::class, 'checkUsername']);
+    Route::match(['GET', 'POST'], '/check-username', [TopupController::class, 'checkUsername']);
+    Route::match(['GET', 'POST'], '/check-id', [TopupController::class, 'checkUsername']);
+    Route::match(['GET', 'POST'], '/mlbb/check-id', [TopupController::class, 'checkUsername']);
     Route::post('/orders', [TopupController::class, 'createOrder']);
     Route::get('/orders/{order}', [TopupController::class, 'showOrder']);
-    Route::post('/mlbb/check-id', [TopupController::class, 'checkUsername']);
 });
 
 /*

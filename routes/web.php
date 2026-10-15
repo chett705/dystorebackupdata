@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Controllers\TopupController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -9,8 +8,6 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-Route::post('/api/payway-webhook', [TopupController::class, 'khqrWebhook']);
-Route::post('/api/khqr-webhook', [TopupController::class, 'khqrWebhook']);
 
 // លីងសម្អាត Cache
 Route::get('/api/clear-route', function () {
