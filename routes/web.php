@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\TopupController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -8,6 +9,7 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+Route::post('/api/khqr-webhook', [TopupController::class, 'khqrWebhook']);
 
 // លីងសម្អាត Cache
 Route::get('/api/clear-route', function () {
@@ -21,7 +23,7 @@ Route::get('/api/clear-route', function () {
 });
 
 
-// Backup Aiven MySQL Database - PHP Onlysdfsf
+// Backup Aiven MySQL Database - PHP Only
 Route::get('/api/backup-database', function () {
 
     // Security token

@@ -127,7 +127,8 @@ class TopupController extends Controller
                 'X-FT-Signature'  => $signature,
             ])
                 ->withoutVerifying()
-                ->timeout(15)
+                ->timeout(6)
+                ->connectTimeout(4)
                 ->withBody($rawJsonBody, 'application/json')
                 ->post('https://api.flashtopup.com' . $path);
 
@@ -155,7 +156,8 @@ class TopupController extends Controller
                     'X-FT-Signature'  => $altSignature,
                 ])
                     ->withoutVerifying()
-                    ->timeout(15)
+                    ->timeout(6)
+                    ->connectTimeout(4)
                     ->withBody($altRawJson, 'application/json')
                     ->post('https://api.flashtopup.com' . $path);
 
@@ -207,6 +209,13 @@ class TopupController extends Controller
                 'message' => $errorData['message'] ?? $errorData['error']['message'] ?? 'Player not found or verification error',
                 'error'   => $errorData
             ], $statusCode >= 100 && $statusCode < 600 ? $statusCode : 400);
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error("🚨 Check Username Connection Timeout: " . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Upstream ID verification server connection timed out. Please try again.',
+                'error'   => $e->getMessage()
+            ], 504);
         } catch (\Throwable $e) {
             Log::error("🚨 Check Username Error: " . $e->getMessage());
             return response()->json(['success' => false, 'message' => 'Error checking ID', 'error' => $e->getMessage()], 500);
@@ -214,7 +223,7 @@ class TopupController extends Controller
     }
 
     /**
-     * បង្កើត Order ថ្មីក្នុងប្រព័ន្ធ និងទាញយក PayWay / KHQR Checkout URL
+     * បង្កើត Order ថ្មីក្នុងប្រព័ន្ធ និងទាញយក KHQR
      */
     public function createOrder(Request $request): JsonResponse
     {
@@ -225,13 +234,8 @@ class TopupController extends Controller
                 'player_id'       => ['required', 'string'],
                 'player_username' => ['nullable', 'string'],
                 'zone_id'         => ['nullable', 'string'],
-                'payment_method'  => ['nullable', 'string'],
+                'payment_method'  => ['required'],
             ]);
-
-            $paymentMethod = $validated['payment_method'] ?? config('services.payment_method', 'payway');
-            if (in_array(strtolower($paymentMethod), ['khqrcc', 'khqr', 'payway'])) {
-                $paymentMethod = 'payway';
-            }
 
             $game = TopupGame::where('code', strtolower($validated['game_code']))->firstOrFail();
             $package = TopupPackage::findOrFail($validated['package_id']);
@@ -243,15 +247,15 @@ class TopupController extends Controller
                 'player_id'        => $validated['player_id'],
                 'player_username'  => $validated['player_username'] ?? '',
                 'zone_id'          => $validated['zone_id'] ?? '',
-                'payment_method'   => $paymentMethod,
+                'payment_method'   => $validated['payment_method'],
                 'amount'           => $package->price,
                 'diamond_amount'   => $package->diamond_amount,
                 'status'           => 'pending',
             ]);
 
-            // ⚡ ហៅ TopupService តាមរយៈ app() helper ផ្ទាល់ ដើម្បីបង្កើត Checkout URL (PayWay / KHQR)
+            // ⚡ ដំណោះស្រាយ៖ ហៅ TopupService តាមរយៈ app() helper ផ្ទាល់ ដើម្បីកុំឱ្យគាំង Server Error 500
             $topupService = app(TopupService::class);
-            [$checkoutUrl, $paymentData] = $topupService->buildCheckout($order);
+            [$checkoutUrl, $paymentData] = $topupService->buildKhqrCheckout($order);
 
             $order->update([
                 'gateway_transaction_id' => $paymentData['transaction_id'] ?? $order->order_no,
@@ -259,7 +263,7 @@ class TopupController extends Controller
                 'gateway_hash'           => $paymentData['hash'] ?? null,
             ]);
 
-            return response()->json(['message' => 'PayWay Checkout Generated', 'order' => $order, 'checkout_url' => $checkoutUrl], 201);
+            return response()->json(['message' => 'QR Generated', 'order' => $order, 'checkout_url' => $checkoutUrl], 201);
             
         } catch (\Throwable $e) {
             Log::error("🚨 Create Order Function Error: " . $e->getMessage());
@@ -326,19 +330,13 @@ class TopupController extends Controller
             }
 
             // ==========================================
-            // 🏦 ផ្នែកទី ២៖ Webhook ធនាគារបង់លុយ (PayWay / KHQR) -> បាញ់អូតូភ្លាមៗ
+            // 🏦 ផ្នែកទី ២៖ Webhook ធនាគារបង់លុយ (KHQR) -> បាញ់អូតូភ្លាមៗ
             // ==========================================
-            $transactionId = $request->input('transaction_id')
-                ?? $request->input('tran_id')
-                ?? $request->input('merchant_ref_no');
-
-            $status = $request->input('status')
-                ?? $request->input('payment_status');
-
-            if (!$transactionId || $status === null) {
+            if (!$request->has('transaction_id') || !$request->has('status')) {
                 return response()->json(['message' => 'Invalid Webhook'], 400);
             }
 
+            $transactionId = $request->input('transaction_id');
             $cleanWebhookKey = trim(str_replace('#', '', $transactionId));
 
             $order = TopupOrder::where('gateway_transaction_id', $cleanWebhookKey)
@@ -347,7 +345,7 @@ class TopupController extends Controller
 
             if (!$order) return response()->json(['message' => 'Order not found'], 404);
 
-            if (in_array(strtolower((string)$status), ['0', '00', 'success', 'paid', 'completed'])) {
+            if (in_array(strtolower($request->input('status')), ['success', 'paid', 'completed'])) {
                 
                 if (in_array($order->status, ['processing', 'success'])) {
                     return response()->json(['success' => true, 'status' => 'success', 'message' => 'Already processed']);
